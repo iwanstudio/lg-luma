@@ -406,6 +406,9 @@ fn focused_navigation_tabs_switch_pages_immediately() {
     assert_eq!(state.page, Page::Apps);
     assert_eq!(state.focus, Target::Nav(1));
     state.direction(Direction::Right, &controls(&state));
+    assert_eq!(state.page, Page::Dom);
+    assert_eq!(state.focus, Target::Nav(2));
+    state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.page, Page::Settings);
     assert_eq!(state.focus, Target::Nav(3));
 }
@@ -753,8 +756,8 @@ fn system_category_owns_refresh_and_quit_and_restores_sidebar_focus() {
     state.back();
     assert_eq!(state.focus, Target::Sidebar(crate::state::SYSTEM_SECTION));
     state.direction(Direction::Down, &controls(&state));
-    assert_eq!(state.focus, Target::Sidebar(0));
-    assert_eq!(state.section, 0);
+    assert_eq!(state.focus, Target::Sidebar(crate::state::BRIDGE_SECTION));
+    assert_eq!(state.section, crate::state::BRIDGE_SECTION);
 }
 
 #[test]

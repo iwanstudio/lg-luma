@@ -291,7 +291,7 @@ fn home_header_has_only_navigation_and_tv_settings() {
         .into_iter()
         .filter(|control| control.rect.y < 120.)
         .collect();
-    assert_eq!(header.len(), 4);
+    assert_eq!(header.len(), 5);
     assert!(
         header
             .iter()
