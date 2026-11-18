@@ -1,4 +1,4 @@
-//! Bundled English, German, Spanish, Chinese, Brazilian Portuguese and Italian message catalog.
+//! Bundled English, German, Spanish, Chinese, Brazilian Portuguese, Italian and Polish message catalog.
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::BTreeMap, sync::OnceLock};
 use time::OffsetDateTime;
@@ -22,9 +22,18 @@ pub enum Language {
     Es,
     Pt,
     It,
+    Pl,
 }
 impl Language {
-    pub const ALL: [Self; 6] = [Self::En, Self::De, Self::Zh, Self::Es, Self::Pt, Self::It];
+    pub const ALL: [Self; 7] = [
+        Self::En,
+        Self::De,
+        Self::Zh,
+        Self::Es,
+        Self::Pt,
+        Self::It,
+        Self::Pl,
+    ];
     pub fn code(self) -> &'static str {
         match self {
             Self::En => "en",
@@ -33,6 +42,7 @@ impl Language {
             Self::Es => "es",
             Self::Pt => "pt",
             Self::It => "it",
+            Self::Pl => "pl",
         }
     }
     pub fn name(self) -> &'static str {
@@ -43,6 +53,7 @@ impl Language {
             Self::Es => "Español",
             Self::Pt => "Português (Brasil)",
             Self::It => "Italiano",
+            Self::Pl => "Polski",
         }
     }
     pub fn index(self) -> usize {
@@ -53,6 +64,7 @@ impl Language {
             Self::Es => 3,
             Self::Pt => 4,
             Self::It => 5,
+            Self::Pl => 6,
         }
     }
     pub fn t(self, key: &str) -> &str {
@@ -250,6 +262,34 @@ impl Language {
                 ][month]
             )
             .to_uppercase(),
+            Self::Pl => format!(
+                "{}, {} {}",
+                [
+                    "poniedziałek",
+                    "wtorek",
+                    "środa",
+                    "czwartek",
+                    "piątek",
+                    "sobota",
+                    "niedziela"
+                ][weekday],
+                now.day(),
+                [
+                    "stycznia",
+                    "lutego",
+                    "marca",
+                    "kwietnia",
+                    "maja",
+                    "czerwca",
+                    "lipca",
+                    "sierpnia",
+                    "września",
+                    "października",
+                    "listopada",
+                    "grudnia"
+                ][month]
+            )
+            .to_uppercase(),
         }
     }
     pub fn clock(self, now: OffsetDateTime, hour24: bool, seconds: bool) -> String {
@@ -300,6 +340,7 @@ pub fn deserialize_language<'de, D: Deserializer<'de>>(
             Some("es") => Language::Es,
             Some("pt") => Language::Pt,
             Some("it") => Language::It,
+            Some("pl") => Language::Pl,
             _ => Language::En,
         },
     )
@@ -387,6 +428,7 @@ mod tests {
         assert_eq!(Language::En.clock(now, true, false), "20:41");
         assert_eq!(Language::En.clock(now, true, true), "20:41:00");
         assert_eq!(Language::En.clock(now, false, true), "8:41:00 PM");
+        assert_eq!(Language::Pl.date(now), "ŚRODA, 21 PAŹDZIERNIKA");
     }
     #[test]
     fn portuguese_dates_include_accented_names_and_handle_leap_days() {

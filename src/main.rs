@@ -1,11 +1,13 @@
 mod app_artwork;
 mod branding;
+mod bridge;
 mod diagnostics;
 mod font;
 mod i18n;
 #[cfg(all(feature = "webos", target_os = "linux", target_arch = "arm"))]
 mod luna;
 mod model;
+mod pair;
 mod platform;
 mod raster;
 mod recents;
@@ -187,6 +189,52 @@ fn is_back(key: Keycode, webos: bool) -> bool {
         || (webos && i32::from(key) == WEBOS_BACK_KEYCODE)
 }
 
+fn digit_of(key: Keycode) -> Option<u8> {
+    match key {
+        Keycode::Num0 | Keycode::Kp0 => Some(0),
+        Keycode::Num1 | Keycode::Kp1 => Some(1),
+        Keycode::Num2 | Keycode::Kp2 => Some(2),
+        Keycode::Num3 | Keycode::Kp3 => Some(3),
+        Keycode::Num4 | Keycode::Kp4 => Some(4),
+        Keycode::Num5 | Keycode::Kp5 => Some(5),
+        Keycode::Num6 | Keycode::Kp6 => Some(6),
+        Keycode::Num7 | Keycode::Kp7 => Some(7),
+        Keycode::Num8 | Keycode::Kp8 => Some(8),
+        Keycode::Num9 | Keycode::Kp9 => Some(9),
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+struct ShortcutHold {
+    press: Option<(u8, Instant, bool)>,
+}
+
+impl ShortcutHold {
+    fn down(&mut self, digit: u8, now: Instant) {
+        if self.press.is_none() {
+            self.press = Some((digit, now, false));
+        }
+    }
+
+    fn held(&mut self, now: Instant) -> Option<u8> {
+        if let Some((digit, start, fired)) = &mut self.press
+            && !*fired
+            && now.duration_since(*start) >= Duration::from_millis(600)
+        {
+            *fired = true;
+            return Some(*digit);
+        }
+        None
+    }
+
+    fn up(&mut self, digit: u8) {
+        if self.press.is_some_and(|(pressed, _, _)| pressed == digit) {
+            self.press = None;
+        }
+    }
+}
+
 #[derive(Default)]
 struct BackButton {
     press: Option<(i32, Instant, bool)>,
@@ -264,6 +312,7 @@ fn effects(
     platform: &Platform,
     preferences: &std::path::Path,
     weather: &weather_service::Service,
+    bridge: &bridge::Service,
 ) -> bool {
     for effect in effects {
         match effect {
@@ -320,6 +369,25 @@ fn effects(
                 });
             }
             Effect::Weather(command) => weather.send(command),
+            Effect::BridgeRefresh => {
+                bridge.configure(&state.preferences.ha_url, &state.preferences.ha_token)
+            }
+            Effect::BridgePress(id) => bridge.press(id),
+            Effect::StartPairing => match bridge.start_pairing() {
+                Ok(offer) => {
+                    state.pairing = Some(offer);
+                    state.focus = state::Target::HaPairCancel;
+                    state.scroll = 0.;
+                    state.dirty = true;
+                }
+                Err(error) => state.notify(error),
+            },
+            Effect::StopPairing => {
+                state.pairing = None;
+                bridge.stop_pairing();
+                state.dirty = true;
+            }
+            Effect::Watch(id) => bridge.watch(id),
         }
     }
     true
@@ -340,7 +408,7 @@ fn script(
             vec![]
         }
         "settings" => {
-            state.open(2);
+            state.open(3);
             vec![]
         }
         "up" => state.direction(Direction::Up, controls),
@@ -403,6 +471,39 @@ fn compose(
     } else {
         scene
     }
+}
+
+fn bridge_tick(state: &mut State, service: &bridge::Service) -> Vec<Effect> {
+    while let Ok(update) = service.receiver.try_recv() {
+        state.apply_bridge(update);
+    }
+    let mut pending = Vec::new();
+    if let Some(id) = state.pending_watch.take() {
+        pending.push(Effect::Watch(Some(id)));
+    }
+    if state.pairing.is_some()
+        && !(state.page == state::Page::Settings && state.section == state::BRIDGE_SECTION)
+    {
+        state.pairing = None;
+        state.dirty = true;
+    }
+    if let Some(paired) = service.poll_paired() {
+        state.preferences.ha_url = paired.url;
+        state.preferences.ha_token = paired.token;
+        state.pairing = None;
+        state.bridge_error = None;
+        state.focus = state::Target::HaPair;
+        state.notify(state.preferences.language.t("haConnected"));
+        state.dirty = true;
+        service.stop_pairing();
+        pending.push(Effect::Save);
+        pending.push(Effect::BridgeRefresh);
+        return pending;
+    }
+    if state.pairing.is_none() {
+        service.stop_pairing();
+    }
+    pending
 }
 
 fn weather_tick(state: &mut State, service: &weather_service::Service, visible: bool) {
@@ -584,6 +685,8 @@ fn run() -> Result<(), String> {
         weather_service::Client::new(options.weather_test_server.as_deref())?,
         weather_cache,
     );
+    let bridge_service = bridge::Service::new();
+    bridge_service.configure(&state.preferences.ha_url, &state.preferences.ha_token);
     let platform = Platform::new(
         webos,
         options.preferences.is_none() && options.test_extra_apps == 0,
@@ -594,6 +697,7 @@ fn run() -> Result<(), String> {
         &platform,
         &preferences_path,
         &weather_service,
+        &bridge_service,
     );
     platform.sync_splash(&state.preferences.background);
     startup_stage("preferences and workers");
@@ -726,6 +830,7 @@ fn run() -> Result<(), String> {
     };
     let mut press: Option<Press> = None;
     let mut back_button = BackButton::default();
+    let mut shortcut = ShortcutHold::default();
     let initial_nav = view::navigation(&assets, state.preferences.language);
     let mut pill = initial_nav.items[0].x;
     let mut pill_width = initial_nav.items[0].w;
@@ -835,11 +940,21 @@ fn run() -> Result<(), String> {
                         &platform,
                         &preferences_path,
                         &weather_service,
+                        &bridge_service,
                     );
                 }
             }
         }
         weather_tick(&mut state, &weather_service, visible);
+        let paired = bridge_tick(&mut state, &bridge_service);
+        running &= effects(
+            paired,
+            &mut state,
+            &platform,
+            &preferences_path,
+            &weather_service,
+            &bridge_service,
+        );
         // Rebuild hit regions before input whenever inventory/layout changed.
         if state.dirty {
             scene = compose(&mut state, &assets, pill, pill_width, now);
@@ -921,8 +1036,16 @@ fn run() -> Result<(), String> {
                     start,
                     length,
                     ..
-                } if text.is_empty() && matches!(state.overlay, Some(Overlay::SystemKeyboard)) => {
-                    state.delete_surrounding_text(start, length);
+                } if matches!(state.overlay, Some(Overlay::SystemKeyboard)) => {
+                    if matches!(
+                        state.keyboard_field,
+                        state::TextField::HaUrl | state::TextField::HaCode
+                    ) {
+                        state.set_ha_compose(&text);
+                    }
+                    if text.is_empty() {
+                        state.delete_surrounding_text(start, length);
+                    }
                 }
                 Event::KeyDown {
                     keycode: Some(key),
@@ -988,8 +1111,26 @@ fn run() -> Result<(), String> {
                             state.options();
                         }
                         Keycode::F5 if !repeat => pending.push(Effect::Reload),
+                        key if !repeat && digit_of(key).is_some() => {
+                            let digit = digit_of(key).unwrap();
+                            if matches!(state.overlay, Some(Overlay::Shortcut { .. })) {
+                                press = None;
+                                shortcut.up(digit);
+                                pending = state.activate_shortcut_digit(digit);
+                            } else if state.overlay.is_none()
+                                && state.moving.is_none()
+                                && !state.text_input_active()
+                            {
+                                shortcut.down(digit, Instant::now());
+                            }
+                        }
                         _ => {}
                     }
+                }
+                Event::KeyUp {
+                    keycode: Some(key), ..
+                } if digit_of(key).is_some() => {
+                    shortcut.up(digit_of(key).unwrap());
                 }
                 Event::KeyUp {
                     keycode: Some(key), ..
@@ -1120,6 +1261,7 @@ fn run() -> Result<(), String> {
                 &platform,
                 &preferences_path,
                 &weather_service,
+                &bridge_service,
             );
             if press
                 .as_ref()
@@ -1137,6 +1279,18 @@ fn run() -> Result<(), String> {
                 scene = compose(&mut state, &assets, pill, pill_width, now);
             }
         }
+        if let Some(digit) = shortcut.held(Instant::now()) {
+            press = None;
+            let pending = state.launch_shortcut(digit);
+            running &= effects(
+                pending,
+                &mut state,
+                &platform,
+                &preferences_path,
+                &weather_service,
+                &bridge_service,
+            );
+        }
         if back_button.held(Instant::now()) {
             press = None;
             let pending = state.open_recents();
@@ -1146,6 +1300,7 @@ fn run() -> Result<(), String> {
                 &platform,
                 &preferences_path,
                 &weather_service,
+                &bridge_service,
             );
         }
         if let Some(held) = &mut press
@@ -1154,7 +1309,15 @@ fn run() -> Result<(), String> {
         {
             held.held = true;
             state.pressed = None;
-            state.hold();
+            let pending = state.hold();
+            running &= effects(
+                pending,
+                &mut state,
+                &platform,
+                &preferences_path,
+                &weather_service,
+                &bridge_service,
+            );
         }
         if !state.loading
             && frame.is_multiple_of(3)
@@ -1175,10 +1338,20 @@ fn run() -> Result<(), String> {
                     &platform,
                     &preferences_path,
                     &weather_service,
+                    &bridge_service,
                 );
             }
         }
         weather_tick(&mut state, &weather_service, visible);
+        let paired = bridge_tick(&mut state, &bridge_service);
+        running &= effects(
+            paired,
+            &mut state,
+            &platform,
+            &preferences_path,
+            &weather_service,
+            &bridge_service,
+        );
         // SDL-webOS disables text input when its own panel is dismissed, even
         // if it did not forward a Back/Return key to the application.
         if text_active
@@ -1193,6 +1366,7 @@ fn run() -> Result<(), String> {
                 &platform,
                 &preferences_path,
                 &weather_service,
+                &bridge_service,
             );
         }
         let keyboard = state.text_input_active();

@@ -102,7 +102,7 @@ fn remote_routes_from_header_and_back_through_settings() {
     assert_eq!(state.focus, Target::App("netflix".into()));
     state.direction(Direction::Up, &controls(&state));
     assert_eq!(state.focus, Target::Nav(0));
-    state.open(2);
+    state.open(3);
     state.direction(Direction::Down, &controls(&state));
     assert_eq!(state.focus, Target::Sidebar(0));
     state.activate();
@@ -110,7 +110,7 @@ fn remote_routes_from_header_and_back_through_settings() {
     assert!(state.back().is_empty());
     assert_eq!(state.focus, Target::Sidebar(0));
     state.back();
-    assert_eq!(state.focus, Target::Nav(2));
+    assert_eq!(state.focus, Target::Nav(3));
     state.back();
     assert_eq!(state.page, Page::Home);
     assert_eq!(
@@ -324,7 +324,7 @@ fn preferences_round_trip_and_corrupt_data_is_not_silently_overwritten() {
 #[test]
 fn gallery_and_grid_navigation_scroll_to_keep_focus_visible() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = 1;
     state.focus = Target::Background(0);
     state.direction(Direction::Down, &controls(&state));
@@ -372,7 +372,7 @@ fn pointer_focus_does_not_scroll_the_clicked_control() {
 #[test]
 fn gallery_right_crosses_rows_in_gallery_order() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = 1;
     state.focus = Target::Background(2);
     state.direction(Direction::Right, &controls(&state));
@@ -407,13 +407,13 @@ fn focused_navigation_tabs_switch_pages_immediately() {
     assert_eq!(state.focus, Target::Nav(1));
     state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.page, Page::Settings);
-    assert_eq!(state.focus, Target::Nav(2));
+    assert_eq!(state.focus, Target::Nav(3));
 }
 
 #[test]
 fn greeting_subpage_opens_the_keyboard_and_back_restores_its_parent() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(6);
     assert!(
         state
@@ -446,7 +446,7 @@ fn greeting_name_replacement_commits_on_every_keyboard_completion_route() {
     for route in 0..3 {
         let mut state = ready();
         state.preferences.greeting_name = "Ana".into();
-        state.open(2);
+        state.open(3);
         state.focus = Target::Setting(6);
         state.activate();
         state.activate();
@@ -482,7 +482,7 @@ fn greeting_name_replacement_commits_on_every_keyboard_completion_route() {
 fn remote_can_clear_a_saved_greeting_name_without_moving_the_controls() {
     let mut state = ready();
     state.preferences.greeting_name = "Ana".into();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(6);
     state.activate();
     let before: Vec<_> = controls(&state)
@@ -512,7 +512,7 @@ fn app_name_settings_use_independent_defaults_including_with_legacy_preferences(
     let mut state = ready();
     assert!(!state.preferences.show_home_names);
     assert!(state.preferences.show_app_names);
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(0);
     assert!(
         state
@@ -573,7 +573,7 @@ fn input_name_actions_only_highlight_the_focused_row_and_keep_the_saved_mode() {
     state
         .preferences
         .set_input_name("com.webos.app.hdmi1", "Console");
-    state.open(2);
+    state.open(3);
     state.section = crate::state::INPUTS_SECTION;
     state.focus = Target::InputMode("com.webos.app.hdmi1".into());
     state.activate();
@@ -615,7 +615,7 @@ fn clock_choices_only_highlight_focus_while_preserving_saved_checkmarks() {
     let mut state = ready();
     state.preferences.reduced_motion = true;
     state.preferences.show_seconds = true;
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(1);
     state.activate();
     state.activate();
@@ -650,7 +650,7 @@ fn clock_choices_only_highlight_focus_while_preserving_saved_checkmarks() {
 #[test]
 fn clock_format_subpage_saves_and_restores_its_parent_row() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(1);
     assert!(
         state
@@ -689,7 +689,7 @@ fn clock_format_subpage_saves_and_restores_its_parent_row() {
 fn time_format_selects_seconds_without_changing_the_hour_format() {
     let mut state = ready();
     state.preferences.hour_24 = true;
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(1);
     state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.subpage, Some(crate::state::Subpage::Clock));
@@ -729,7 +729,7 @@ fn time_format_selects_seconds_without_changing_the_hour_format() {
 #[test]
 fn system_category_owns_refresh_and_quit_and_restores_sidebar_focus() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     assert!(
         !controls(&state)
             .iter()
@@ -760,7 +760,7 @@ fn system_category_owns_refresh_and_quit_and_restores_sidebar_focus() {
 #[test]
 fn input_visibility_has_explicit_choices_and_returns_to_the_same_input() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::INPUTS_SECTION;
     let id = "com.webos.app.hdmi1".to_string();
     state.focus = Target::InputMode(id.clone());
@@ -780,7 +780,7 @@ fn input_visibility_has_explicit_choices_and_returns_to_the_same_input() {
 #[test]
 fn background_entry_restores_the_applied_background() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.preferences.background = "forest".into();
     state.focus = Target::Sidebar(1);
     state.section = 1;
@@ -834,9 +834,51 @@ fn a_notice_does_not_escape_modal_focus_and_closing_restores_the_app() {
     );
     state.focus = Target::Option(1);
     state.direction(Direction::Down, &controls(&state));
-    assert_eq!(state.focus, Target::Option(1));
+    assert_eq!(state.focus, Target::Option(2));
+    state.direction(Direction::Down, &controls(&state));
+    assert_eq!(state.focus, Target::Option(2));
     state.back();
     assert_eq!(state.focus, Target::App("netflix".into()));
+}
+
+#[test]
+fn a_number_shortcut_is_unique_and_launches_the_assigned_app() {
+    let mut state = ready();
+    state.focus = Target::App("netflix".into());
+    state.options();
+    state.focus = Target::Option(2);
+    assert!(state.activate().is_empty());
+    assert!(matches!(state.overlay, Some(Overlay::Shortcut { .. })));
+    state.focus = Target::Option(0);
+    assert_eq!(state.activate(), vec![Effect::Save]);
+    assert_eq!(
+        state.preferences.shortcuts.get("1").map(String::as_str),
+        Some("netflix")
+    );
+    assert_eq!(
+        state.launch_shortcut(1),
+        vec![Effect::Launch("netflix".into())]
+    );
+    assert!(state.launch_shortcut(2).is_empty());
+    state.focus = Target::App("youtube.leanback.v4".into());
+    state.options();
+    state.focus = Target::Option(2);
+    state.activate();
+    state.focus = Target::Option(0);
+    state.activate();
+    assert_eq!(
+        state.preferences.shortcuts.get("1").map(String::as_str),
+        Some("youtube.leanback.v4")
+    );
+    assert!(state.preferences.digit_for_app("netflix").is_none());
+    state.focus = Target::App("youtube.leanback.v4".into());
+    state.options();
+    state.focus = Target::Option(2);
+    state.activate();
+    state.focus = Target::Option(10);
+    assert_eq!(state.activate(), vec![Effect::Save]);
+    assert!(state.preferences.shortcuts.is_empty());
+    state.back();
 }
 
 #[test]
@@ -873,7 +915,7 @@ fn long_captions_expand_rows_without_overlapping_the_next_row() {
 fn reduced_motion_disables_panel_wallpaper_and_notification_animation() {
     let mut state = ready();
     state.preferences.reduced_motion = true;
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(1);
     state.activate();
     assert!(!state.animating());
@@ -907,7 +949,7 @@ fn pinning_a_hidden_app_restores_it_and_leaves_hidden_when_empty() {
 #[test]
 fn weather_location_keyboard_back_and_sidebar_routes_restore_focus() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Sidebar(crate::state::WEATHER_SECTION);
     state.section = crate::state::WEATHER_SECTION;
     state.activate();
@@ -930,7 +972,7 @@ fn weather_location_keyboard_back_and_sidebar_routes_restore_focus() {
 #[test]
 fn weather_units_save_without_replacing_celsius_cache_and_hide_keeps_city() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::WEATHER_SECTION;
     let place = crate::weather::Location {
         name: "Vienna".into(),
@@ -972,7 +1014,7 @@ fn weather_units_save_without_replacing_celsius_cache_and_hide_keeps_city() {
 #[test]
 fn removing_weather_location_clears_cache_and_cancels_pending_results() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::WEATHER_SECTION;
     state.focus = Target::WeatherLocation;
     state.activate();
@@ -993,7 +1035,7 @@ fn removing_weather_location_clears_cache_and_cancels_pending_results() {
 #[test]
 fn language_selection_restores_its_parent_and_is_saved_with_preferences() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(4);
     state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.subpage, Some(crate::state::Subpage::Language));
@@ -1011,7 +1053,7 @@ fn language_selection_restores_its_parent_and_is_saved_with_preferences() {
 fn remote_can_select_and_restore_every_language() {
     for (index, language) in crate::i18n::Language::ALL.into_iter().enumerate() {
         let mut state = ready();
-        state.open(2);
+        state.open(3);
         state.focus = Target::Setting(4);
         state.activate();
         for _ in 0..index {
@@ -1024,7 +1066,7 @@ fn remote_can_select_and_restore_every_language() {
 
         let saved = serde_json::to_value(&state.preferences).unwrap();
         let mut restored = State::new(serde_json::from_value(saved).unwrap());
-        restored.open(2);
+        restored.open(3);
         restored.focus = Target::Setting(4);
         restored.activate();
         assert_eq!(restored.preferences.language, language);
@@ -1240,7 +1282,7 @@ fn custom_input_names_keep_the_label_port_and_status_as_detail() {
 #[test]
 fn remote_renames_and_resets_an_input_from_its_settings_page() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::INPUTS_SECTION;
     let id = "com.webos.app.hdmi2".to_string();
     state.focus = Target::InputMode(id.clone());
@@ -1284,7 +1326,7 @@ fn remote_renames_and_resets_an_input_from_its_settings_page() {
 #[test]
 fn keyboard_done_saves_a_typed_input_name() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::INPUTS_SECTION;
     state.focus = Target::InputMode("com.webos.app.hdmi1".into());
     state.activate();

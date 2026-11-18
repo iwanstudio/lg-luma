@@ -13,7 +13,7 @@ use std::{
     ffi::{CStr, CString},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 
 pub type Color = [f32; 4];
@@ -79,6 +79,7 @@ struct Texture {
     width: u32,
     height: u32,
     frame: u64,
+    modified: Option<SystemTime>,
 }
 impl Drop for Texture {
     fn drop(&mut self) {
@@ -784,13 +785,26 @@ impl Renderer {
             self.stats.high_resolution_wallpaper = true;
         }
         let frame = self.frame;
+        let modified = std::fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .ok();
+        let stale = match self.textures.get(&path) {
+            Some(Some(texture)) => texture.modified != modified,
+            Some(None) => modified.is_some(),
+            None => false,
+        };
+        if stale {
+            self.textures.remove(&path);
+        }
         let entry = self
             .textures
             .entry(path.clone())
             .or_insert_with(|| match image::open(&path) {
                 Ok(image) => {
                     let image = image.into_rgba8();
-                    Some(texture(image.width(), image.height(), image.as_raw()))
+                    let mut texture = texture(image.width(), image.height(), image.as_raw());
+                    texture.modified = modified;
+                    Some(texture)
                 }
                 Err(error) => {
                     eprintln!("Artwork {path}: {error}");
@@ -1314,6 +1328,7 @@ fn texture(width: u32, height: u32, pixels: &[u8]) -> Texture {
         width,
         height,
         frame: 0,
+        modified: None,
     }
 }
 

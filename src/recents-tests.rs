@@ -369,7 +369,7 @@ fn youtube_recents_uses_the_apps_vector_and_the_same_relative_logo_geometry() {
 #[test]
 fn recents_is_modal_and_restores_the_exact_settings_parent() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.subpage = Some(crate::state::Subpage::Clock);
     state.focus = Target::ClockFormat;
     assert_eq!(
@@ -527,7 +527,7 @@ fn recents_pointer_focus_never_moves_hit_regions_and_reduced_motion_snaps() {
 fn recents_crossfade_reverses_without_jumping_and_restores_parent_input_immediately() {
     use crate::renderer::Draw;
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.subpage = Some(crate::state::Subpage::Clock);
     state.focus = Target::ClockFormat;
     let parent = controls(&state);

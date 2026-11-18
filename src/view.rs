@@ -4,9 +4,9 @@ use crate::{
     model::{App, BACKGROUNDS, CATEGORIES, Input, InputMode},
     renderer::{Color, Draw, TextStyle, WHITE},
     state::{
-        APPS_COLUMNS, Control, HOME_FADE_LEFT, HOME_FADE_RIGHT, HOME_STRIP_LEFT, HOME_STRIP_RIGHT,
-        HOME_TILE_PITCH, HOME_TILE_WIDTH, KEYS, Overlay, Page, Rect, SYSTEM_SECTION, State,
-        Subpage, Target, TextField, WEATHER_SECTION,
+        APPS_COLUMNS, BRIDGE_SECTION, Control, HOME_FADE_LEFT, HOME_FADE_RIGHT, HOME_STRIP_LEFT,
+        HOME_STRIP_RIGHT, HOME_TILE_PITCH, HOME_TILE_WIDTH, KEYS, Overlay, Page, Rect,
+        SYSTEM_SECTION, State, Subpage, Target, TextField, WEATHER_SECTION,
     },
     weather::{self, Unit},
 };
@@ -253,10 +253,10 @@ fn text(size: f32, weight: u16, tracking: f32) -> TextStyle {
 
 pub struct Navigation {
     pub surface: Rect,
-    pub items: [Rect; 3],
+    pub items: [Rect; 4],
 }
 pub fn navigation(assets: &Assets, language: Language) -> Navigation {
-    let widths = ["home", "apps", "settings"]
+    let widths = ["home", "apps", "dom", "settings"]
         .map(|key| (assets.width(language.t(key), text(20.8, 550, -0.02)) + 46.4).max(99.2));
     let width = widths.iter().sum::<f32>() + 25.6 + 19.6;
     let mut x = (1920. - width) / 2. + 9.8;
@@ -329,6 +329,7 @@ pub fn scene_with_pill(
     match state.page {
         Page::Home => home(&mut out, state, assets, now),
         Page::Apps => library(&mut out, state, assets),
+        Page::Dom => dom(&mut out, state, assets),
         Page::Settings => settings(&mut out, state, assets),
     }
     if let Some(error) = &state.error
@@ -371,18 +372,31 @@ pub fn scene_with_pill(
     out.draw.push(Draw::Clip(None));
     header(&mut out, state, assets, now, pill_x, pill_width);
     footer(&mut out, state, assets);
-    if let Some(overlay @ (Overlay::Options { .. } | Overlay::Keyboard)) = &state.overlay {
+    if let Some(
+        overlay @ (Overlay::Options { .. }
+        | Overlay::Shortcut { .. }
+        | Overlay::Keyboard
+        | Overlay::Camera { .. }),
+    ) = &state.overlay
+    {
         out.controls.clear();
         let start = out.draw.len();
         out.shape(Rect::new(0., 0., 1920., 1080.), 0., c(0x080b12, 0.70));
         match overlay {
             Overlay::Options { id, .. } => options(&mut out, state, assets, id),
+            Overlay::Shortcut { id, .. } => shortcut_picker(&mut out, state, assets, id),
             Overlay::Keyboard => keyboard(&mut out, state, assets),
+            Overlay::Camera { id } => camera_preview(&mut out, state, id),
             Overlay::SystemKeyboard | Overlay::Recents { .. } => {}
         }
         if let Some(opened) = state.panel_started {
             out.fade(start, (opened.elapsed().as_secs_f32() / 0.12).min(1.), 1.);
         }
+    }
+    if matches!(state.overlay, Some(Overlay::SystemKeyboard))
+        && matches!(state.keyboard_field, TextField::HaUrl | TextField::HaCode)
+    {
+        ha_entry(&mut out, state, assets);
     }
     if state.recents_open() || state.recents.visibility > 0. {
         // Crossfade the actual parent interface as well as the dimmed stage.
@@ -448,7 +462,7 @@ fn header(
         // the destination tab's control rectangle.
         out.border(pill.inset(-5.), 37., 2., c(0xf0f0f0, 0.95));
     }
-    for (index, key) in ["home", "apps", "settings"].into_iter().enumerate() {
+    for (index, key) in ["home", "apps", "dom", "settings"].into_iter().enumerate() {
         let rect = layout.items[index];
         out.text(
             language.t(key),
@@ -793,6 +807,234 @@ fn brand_mark(out: &mut Scene, assets: &Assets, app: &App, rect: Rect, language:
     }
 }
 
+fn dom(out: &mut Scene, state: &State, assets: &Assets) {
+    let _ = assets;
+    let language = state.preferences.language;
+    let s = state.scroll;
+    if state.tiles.is_empty() {
+        let message = state
+            .bridge_error
+            .as_deref()
+            .unwrap_or_else(|| language.t("haEmpty"));
+        out.text(
+            message,
+            Rect::new(84., 180. - s, 1600., 80.),
+            text(28., 450, -0.02).leading(1.3),
+            c(0xf3f3f3, 0.8),
+            false,
+        );
+        return;
+    }
+    let mut groups: Vec<(u8, Vec<crate::bridge::Tile>)> = Vec::new();
+    for tile in &state.tiles {
+        if let Some(group) = groups.iter_mut().find(|(group, _)| *group == tile.group()) {
+            group.1.push(tile.clone());
+        } else {
+            groups.push((tile.group(), vec![tile.clone()]));
+        }
+    }
+    groups.sort_by_key(|(group, _)| *group);
+    let mut y = 150. - s;
+    for (_, tiles) in groups {
+        let key = tiles[0].group_key();
+        out.text(
+            language.t(key),
+            Rect::new(84., y, 1600., 36.),
+            text(26., 550, -0.03),
+            WHITE,
+            false,
+        );
+        y += 52.;
+        if tiles[0].domain == "camera" {
+            y += camera_cards(out, state, &tiles, y);
+        } else {
+            y += ha_buttons(out, state, &tiles, 84., y, 6, true);
+        }
+        y += 36.;
+    }
+}
+
+fn camera_cards(out: &mut Scene, state: &State, tiles: &[crate::bridge::Tile], y: f32) -> f32 {
+    for (index, tile) in tiles.iter().enumerate() {
+        let rect = Rect::new(
+            84. + (index % 3) as f32 * 600.,
+            y + (index / 3) as f32 * 380.,
+            560.,
+            315.,
+        );
+        let focused = state.focus == Target::HaTile(tile.entity_id.clone());
+        out.shape(rect, 18., c(0x101318, 0.9));
+        if let Some(path) = state.shots.get(&tile.entity_id) {
+            out.image(path.clone(), rect, 18., true);
+        } else if let Some(error) = state.shot_errors.get(&tile.entity_id) {
+            out.text(
+                error,
+                Rect::new(rect.x + 24., rect.y + 80., rect.w - 48., 70.),
+                text(18., 450, 0.).leading(1.25),
+                c(0xf3f3f3, 0.8),
+                false,
+            );
+        }
+        out.shape(
+            Rect::new(rect.x, rect.y + rect.h - 64., rect.w, 64.),
+            0.,
+            c(0x080b12, 0.55),
+        );
+        out.text(
+            &tile.name,
+            Rect::new(rect.x + 20., rect.y + rect.h - 48., rect.w - 40., 32.),
+            text(22., 550, -0.02),
+            WHITE,
+            false,
+        );
+        out.border(
+            rect,
+            18.,
+            if focused { 3. } else { 1. },
+            c(0xffffff, if focused { 0.95 } else { 0.12 }),
+        );
+        out.control(Target::HaTile(tile.entity_id.clone()), rect, true);
+    }
+    tiles.len().div_ceil(3) as f32 * 380.
+}
+
+fn camera_preview(out: &mut Scene, state: &State, id: &str) {
+    let language = state.preferences.language;
+    let name = state
+        .tiles
+        .iter()
+        .find(|tile| tile.entity_id == id)
+        .map(|tile| tile.name.as_str())
+        .unwrap_or(id);
+    let panel = Rect::new(160., 70., 1600., 900.);
+    out.shape(panel, 24., c(0x101318, 0.96));
+    out.border(panel, 24., 1., c(0xffffff, 0.12));
+    out.text(
+        name,
+        Rect::new(196., 96., 1200., 40.),
+        text(32., 550, -0.03),
+        WHITE,
+        false,
+    );
+    out.text(
+        language.t("haLive"),
+        Rect::new(1400., 102., 320., 28.),
+        text(18., 450, 0.),
+        c(0xf3f3f3, 0.7),
+        true,
+    );
+    let picture = Rect::new(196., 160., 1528., 720.);
+    out.shape(picture, 16., c(0x080b12, 1.));
+    if let Some(path) = state.shots.get(id) {
+        out.image(path.clone(), picture, 16., true);
+    } else {
+        let message = state
+            .shot_errors
+            .get(id)
+            .map(String::as_str)
+            .unwrap_or_else(|| language.t("haLiveWait"));
+        out.text(
+            message,
+            Rect::new(picture.x, picture.y + 340., picture.w, 36.),
+            text(24., 450, 0.),
+            c(0xf3f3f3, 0.7),
+            true,
+        );
+    }
+    out.text(
+        language.t("haLiveHint"),
+        Rect::new(196., 900., 1528., 32.),
+        text(18., 400, 0.),
+        c(0xf3f3f3, 0.65),
+        false,
+    );
+}
+
+fn ha_buttons(
+    out: &mut Scene,
+    state: &State,
+    tiles: &[crate::bridge::Tile],
+    x: f32,
+    y: f32,
+    columns: usize,
+    mark_pins: bool,
+) -> f32 {
+    let language = state.preferences.language;
+    let pins = state.pinned_ids();
+    for (index, tile) in tiles.iter().enumerate() {
+        let rect = Rect::new(
+            x + (index % columns) as f32 * 300.,
+            y + (index / columns) as f32 * 132.,
+            280.,
+            112.,
+        );
+        let focused = state.focus == Target::HaTile(tile.entity_id.clone());
+        let (fill, ink) = tile_colors(tile, focused);
+        out.shape(rect, 18., fill);
+        out.border(
+            rect,
+            18.,
+            if focused { 2. } else { 1. },
+            if focused {
+                c(0xffffff, 0.9)
+            } else {
+                c(0x000000, 0.18)
+            },
+        );
+        out.text(
+            &tile.name,
+            Rect::new(rect.x + 22., rect.y + 22., rect.w - 44., 32.),
+            text(22., 550, -0.02),
+            ink,
+            false,
+        );
+        let state_label = match tile.state.as_str() {
+            "on" => language.t("haOn"),
+            "off" => language.t("haOff"),
+            "unavailable" | "unknown" => language.t("haUnavailable"),
+            other => other,
+        };
+        out.text(
+            state_label,
+            Rect::new(rect.x + 22., rect.y + 62., rect.w - 44., 24.),
+            text(16., 400, 0.),
+            ink,
+            false,
+        );
+        if mark_pins && pins.iter().any(|pin| pin == &tile.entity_id) {
+            out.shape(
+                Rect::new(rect.x + rect.w - 28., rect.y + 16., 10., 10.),
+                5.,
+                ink,
+            );
+        }
+        out.control(Target::HaTile(tile.entity_id.clone()), rect, true);
+    }
+    tiles.len().div_ceil(columns) as f32 * 132.
+}
+
+fn tile_colors(tile: &crate::bridge::Tile, focused: bool) -> (Color, Color) {
+    let on = matches!(tile.state.as_str(), "on" | "open" | "unlocked");
+    if on && matches!(tile.domain.as_str(), "light" | "switch") {
+        let [r, g, b] = tile.rgb.unwrap_or([255, 209, 102]);
+        let luma = 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b);
+        let fill = [
+            f32::from(r) / 255.,
+            f32::from(g) / 255.,
+            f32::from(b) / 255.,
+            if focused { 1. } else { 0.92 },
+        ];
+        let ink = if luma > 150. { c(0x1a1a1a, 1.) } else { WHITE };
+        return (fill, ink);
+    }
+    let fill = if focused {
+        c(0x30363c, 0.82)
+    } else {
+        c(0x171c22, 0.62)
+    };
+    (fill, WHITE)
+}
+
 fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
     let language = state.preferences.language;
     let s = state.scroll;
@@ -923,7 +1165,27 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
     }
     out.draw.push(Draw::EdgeFadeX(None));
     out.draw.push(Draw::Clip(Some(state.content_viewport())));
-    let input_y = 544.8 + grid_height + 41.6 - s;
+    let mut below = 544.8 + grid_height + 41.6 - s;
+    if state.preferences.show_ha {
+        let pinned = state.pinned_ids();
+        let tiles: Vec<_> = pinned
+            .iter()
+            .filter_map(|id| state.tiles.iter().find(|tile| &tile.entity_id == id))
+            .cloned()
+            .collect();
+        if !tiles.is_empty() {
+            out.text(
+                language.t("haHome"),
+                Rect::new(84., below + 3.3, 1000., 31.),
+                text(23.2, 550, -0.035).leading(1.3),
+                WHITE,
+                false,
+            );
+            let height = ha_buttons(out, state, &tiles, 84., below + 50., 6, false);
+            below += 50. + height + 16.;
+        }
+    }
+    let input_y = below;
     let inputs: Vec<_> = state
         .inventory
         .inputs
@@ -1699,12 +1961,169 @@ fn location_settings(out: &mut Scene, state: &State, assets: &Assets) {
     }
 }
 
+fn bridge_settings(out: &mut Scene, state: &State, assets: &Assets) {
+    let language = state.preferences.language;
+    let s = state.scroll;
+    if let Some(pairing) = &state.pairing {
+        let quiet = 4usize;
+        let cells = pairing.size + quiet * 2;
+        let side = 460.;
+        let cell = side / cells as f32;
+        let origin_x = 640. + (1120. - side) / 2.;
+        let origin_y = 150. - s;
+        out.shape(
+            Rect::new(origin_x - 18., origin_y - 18., side + 36., side + 36.),
+            16.,
+            WHITE,
+        );
+        for y in 0..pairing.size {
+            for x in 0..pairing.size {
+                if pairing.modules[y * pairing.size + x] {
+                    out.shape(
+                        Rect::new(
+                            origin_x + (x + quiet) as f32 * cell,
+                            origin_y + (y + quiet) as f32 * cell,
+                            cell + 0.6,
+                            cell + 0.6,
+                        ),
+                        0.,
+                        c(0x161616, 1.),
+                    );
+                }
+            }
+        }
+        let hint = if pairing.ip == "0.0.0.0" {
+            language.t("haNoNetwork")
+        } else {
+            language.t("haScanHint")
+        };
+        out.text(
+            hint,
+            Rect::new(664., origin_y + side + 36., 1080., 72.),
+            text(18., 400, 0.).leading(1.35),
+            c(0xf3f3f3, 0.86),
+            false,
+        );
+        row(
+            out,
+            state,
+            assets,
+            Row {
+                target: Target::HaPairCancel,
+                rect: Rect::new(640., origin_y + side + 120., 1120., 72.),
+                title: language.t("haPairCancel"),
+                icon: None,
+                value: None,
+                description: None,
+                selected: false,
+                chevron: false,
+            },
+        );
+        return;
+    }
+    let address = if state.preferences.ha_url.is_empty() {
+        language.t("haNotSet")
+    } else {
+        state.preferences.ha_url.as_str()
+    };
+    let code = if state.preferences.ha_token.is_empty() {
+        language.t("haNotSet")
+    } else {
+        language.t("haCodeSet")
+    };
+    let linked = if state.preferences.ha_url.is_empty() {
+        None
+    } else {
+        Some(language.t("haConnected"))
+    };
+    row(
+        out,
+        state,
+        assets,
+        Row {
+            target: Target::HaToggle,
+            rect: Rect::new(640., 164.8 - s, 1120., 90.7),
+            title: language.t("haHomeControl"),
+            icon: None,
+            value: Some(language.t(if state.preferences.show_ha {
+                "stateOn"
+            } else {
+                "stateOff"
+            })),
+            description: Some(language.t("haHomeControlHint")),
+            selected: false,
+            chevron: false,
+        },
+    );
+    row(
+        out,
+        state,
+        assets,
+        Row {
+            target: Target::HaPair,
+            rect: Rect::new(640., 267.5 - s, 1120., 90.7),
+            title: language.t("haPair"),
+            icon: None,
+            value: linked,
+            description: Some(language.t("haPairHint")),
+            selected: false,
+            chevron: true,
+        },
+    );
+    row(
+        out,
+        state,
+        assets,
+        Row {
+            target: Target::HaAddress,
+            rect: Rect::new(640., 370.2 - s, 1120., 90.7),
+            title: language.t("haAddress"),
+            icon: None,
+            value: Some(address),
+            description: Some(language.t("haAddressHint")),
+            selected: false,
+            chevron: true,
+        },
+    );
+    row(
+        out,
+        state,
+        assets,
+        Row {
+            target: Target::HaCode,
+            rect: Rect::new(640., 472.9 - s, 1120., 90.7),
+            title: language.t("haCode"),
+            icon: None,
+            value: Some(code),
+            description: Some(language.t("haCodeHint")),
+            selected: false,
+            chevron: true,
+        },
+    );
+    if let Some(error) = &state.bridge_error {
+        out.text(
+            error,
+            Rect::new(664., 580. - s, 1080., 40.),
+            text(16., 400, 0.),
+            c(0xf3ddbd, 0.9),
+            false,
+        );
+    }
+}
+
 fn settings(out: &mut Scene, state: &State, assets: &Assets) {
     let language = state.preferences.language;
     let s = state.scroll;
-    for (index, key) in ["interface", "background", "weather", "inputs", "system"]
-        .into_iter()
-        .enumerate()
+    for (index, key) in [
+        "interface",
+        "background",
+        "weather",
+        "inputs",
+        "system",
+        "homeAssistant",
+    ]
+    .into_iter()
+    .enumerate()
     {
         let label = language.t(key);
         let rect = Rect::new(160., 164.8 + index as f32 * 84. - s, 403.2, 72.);
@@ -2024,6 +2443,7 @@ fn settings(out: &mut Scene, state: &State, assets: &Assets) {
                 );
             }
         }
+        BRIDGE_SECTION => bridge_settings(out, state, assets),
         _ => {
             for (index, input) in state.inventory.inputs.iter().enumerate() {
                 let mode = state
@@ -2332,10 +2752,21 @@ fn keycap(out: &mut Scene, label: &str, x: f32, y: f32, w: f32, small: bool) {
 fn footer(out: &mut Scene, state: &State, assets: &Assets) {
     let language = state.preferences.language;
     let style = text(14.4, 400, 0.005);
+    let color = c(0xeeeeee, 0.37);
     if state.page == Page::Home && state.moving.is_none() {
         return;
     }
-    let color = c(0xeeeeee, 0.37);
+    if state.page == Page::Dom {
+        keycap(out, "OK", 84., 1030.4, 27., false);
+        out.text(
+            language.t("haPinHint"),
+            Rect::new(119., 1033., 1500., 20.),
+            text(14.4, 400, 0.005),
+            color,
+            false,
+        );
+        return;
+    }
     if state.moving.is_some() {
         keycap(out, "← →", 84., 1030.4, 42., false);
         out.text(
@@ -2484,7 +2915,7 @@ fn options(out: &mut Scene, state: &State, assets: &Assets, id: &str) {
         .lines(title, text(37.6, 500, -0.055).leading(1.1), 432.)
         .saturating_sub(1) as f32
         * 41.4;
-    let panel = Rect::new(680., 362.9 - extra / 2., 560., 354.2 + extra);
+    let panel = Rect::new(680., 324.5 - extra / 2., 560., 431. + extra);
     out.modal = Some(panel);
     out.shadow(panel, 27.2, 120., 25., 0.47);
     out.draw.push(Draw::RoundedGradient(
@@ -2522,17 +2953,24 @@ fn options(out: &mut Scene, state: &State, assets: &Assets, id: &str) {
         .iter()
         .any(|item| item == id);
     let hidden = state.preferences.hidden.iter().any(|item| item == id);
-    for (index, label) in [
+    let assigned = state.preferences.digit_for_app(id);
+    let labels = [
         if favorite {
             language.t("removeFavorite")
         } else {
             language.t("addFavorite")
+        }
+        .to_owned(),
+        language
+            .t(if hidden { "showApp" } else { "hideApp" })
+            .to_owned(),
+        if let Some(digit) = assigned {
+            language.format("shortcutKey", &[("key", &digit.to_string())])
+        } else {
+            language.t("assignShortcut").to_owned()
         },
-        language.t(if hidden { "showApp" } else { "hideApp" }),
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    ];
+    for (index, label) in labels.iter().enumerate() {
         let rect = Rect::new(
             717.8,
             panel.y + 137.9 + extra + index as f32 * 76.8,
@@ -2550,18 +2988,36 @@ fn options(out: &mut Scene, state: &State, assets: &Assets, id: &str) {
                 if focused { 0.95 } else { 0.05 },
             ),
         );
-        out.icon(
-            assets,
-            if index == 0 {
-                if favorite { "heart-filled" } else { "heart" }
-            } else if hidden {
-                "eye"
-            } else {
-                "eye-off"
-            },
-            Rect::new(rect.x + 18.6, rect.y + 22.8, 21.6, 21.6),
-            if focused { WHITE } else { c(0xe4e4e4, 0.61) },
-        );
+        if index == 2 {
+            let mark = assigned
+                .map(|digit| digit.to_string())
+                .unwrap_or_else(|| "#".into());
+            out.shape(
+                Rect::new(rect.x + 16.6, rect.y + 20.8, 25.6, 25.6),
+                6.,
+                c(0xffffff, 0.08),
+            );
+            out.text(
+                &mark,
+                Rect::new(rect.x + 16.6, rect.y + 23.4, 25.6, 20.),
+                text(13.6, 600, 0.),
+                if focused { WHITE } else { c(0xe4e4e4, 0.8) },
+                true,
+            );
+        } else {
+            out.icon(
+                assets,
+                if index == 0 {
+                    if favorite { "heart-filled" } else { "heart" }
+                } else if hidden {
+                    "eye"
+                } else {
+                    "eye-off"
+                },
+                Rect::new(rect.x + 18.6, rect.y + 22.8, 21.6, 21.6),
+                if focused { WHITE } else { c(0xe4e4e4, 0.61) },
+            );
+        }
         out.text(
             label,
             Rect::new(rect.x + 56.2, rect.y + 22., rect.w - 74., 25.),
@@ -2596,6 +3052,156 @@ fn options(out: &mut Scene, state: &State, assets: &Assets, id: &str) {
     );
 }
 
+fn shortcut_picker(out: &mut Scene, state: &State, assets: &Assets, id: &str) {
+    let language = state.preferences.language;
+    let app = state.inventory.apps.iter().find(|app| app.id == id);
+    let title = app.map_or(id, |app| app.title.as_str());
+    let assigned = state.preferences.digit_for_app(id);
+    let panel = Rect::new(
+        470.,
+        if assigned.is_some() { 220. } else { 260. },
+        980.,
+        if assigned.is_some() { 640. } else { 540. },
+    );
+    out.modal = Some(panel);
+    out.shadow(panel, 27.2, 120., 25., 0.47);
+    out.draw.push(Draw::RoundedGradient(
+        panel,
+        27.2,
+        c(0x34383b, 0.96),
+        c(0x24282d, 0.988),
+    ));
+    out.border(panel, 27.2, 1., c(0xffffff, 0.12));
+    out.text(
+        title,
+        Rect::new(panel.x + 40., panel.y + 36., 820., 42.),
+        text(37.6, 500, -0.055),
+        WHITE,
+        false,
+    );
+    out.text(
+        language.t("shortcutHint"),
+        Rect::new(panel.x + 40., panel.y + 92., 820., 28.),
+        text(16., 400, 0.),
+        c(0xf5f5f5, 0.56),
+        false,
+    );
+    let close = Rect::new(panel.x + panel.w - 72., panel.y + 40., 33.6, 33.6);
+    out.shape(close, 16.8, c(0xffffff, 0.035));
+    out.border(close, 16.8, 1., c(0xffffff, 0.07));
+    out.icon(assets, "close", close.inset(7.6), WHITE);
+    if state.focus == Target::CloseDialog {
+        out.border(close.inset(1.), 15.8, 2., WHITE);
+    }
+    out.control(Target::CloseDialog, close, false);
+    const DIGITS: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+    for (index, label) in DIGITS.iter().enumerate() {
+        let column = index % 5;
+        let row = index / 5;
+        let rect = Rect::new(
+            panel.x + 48. + column as f32 * 180.,
+            panel.y + 160. + row as f32 * 130.,
+            156.,
+            108.,
+        );
+        let focused = state.focus == Target::Option(index);
+        let taken = state.preferences.shortcuts.get(*label);
+        out.shape(rect, 16., c(0xffffff, if focused { 0.1 } else { 0.03 }));
+        out.border(
+            rect,
+            16.,
+            if focused { 2. } else { 1. },
+            c(
+                if focused { 0xf0f0f0 } else { 0xffffff },
+                if focused { 0.95 } else { 0.08 },
+            ),
+        );
+        out.text(
+            *label,
+            Rect::new(rect.x, rect.y + 22., rect.w, 40.),
+            text(32., 600, -0.03),
+            WHITE,
+            true,
+        );
+        if let Some(app_id) = taken {
+            let name = state
+                .inventory
+                .apps
+                .iter()
+                .find(|app| &app.id == app_id)
+                .map_or(app_id.as_str(), |app| app.title.as_str());
+            out.text(
+                name,
+                Rect::new(rect.x + 10., rect.y + 70., rect.w - 20., 22.),
+                text(13., 400, 0.),
+                c(0xe4e4e4, 0.55),
+                true,
+            );
+        }
+        out.control(Target::Option(index), rect, false);
+    }
+    if assigned.is_some() {
+        let rect = Rect::new(panel.x + 48., panel.y + 440., 884., 67.2);
+        let focused = state.focus == Target::Option(10);
+        out.shape(rect, 12., c(0xffffff, if focused { 0.07 } else { 0.016 }));
+        out.border(
+            rect,
+            12.,
+            if focused { 2. } else { 1. },
+            c(
+                if focused { 0xf0f0f0 } else { 0xffffff },
+                if focused { 0.95 } else { 0.05 },
+            ),
+        );
+        out.text(
+            language.t("clearShortcut"),
+            Rect::new(rect.x, rect.y + 20., rect.w, 26.),
+            text(17.6, 500, -0.015),
+            WHITE,
+            true,
+        );
+        out.control(Target::Option(10), rect, false);
+    }
+}
+
+fn ha_entry(out: &mut Scene, state: &State, _assets: &Assets) {
+    let language = state.preferences.language;
+    let title = match state.keyboard_field {
+        TextField::HaCode => language.t("haCode"),
+        _ => language.t("haAddress"),
+    };
+    let panel = Rect::new(240., 150., 1440., 210.);
+    out.shadow(panel, 24., 40., 12., 0.4);
+    out.shape(panel, 24., c(0x24282d, 0.98));
+    out.border(panel, 24., 1., c(0xffffff, 0.12));
+    out.text(
+        title,
+        Rect::new(276., 174., 1360., 32.),
+        text(22., 550, -0.02),
+        WHITE,
+        false,
+    );
+    let field = Rect::new(276., 222., 1368., 96.);
+    out.shape(field, 16., c(0x171c20, 1.));
+    out.border(field, 16., 2., c(0xf3f3f3, 0.85));
+    let shown = if state.ha_draft.is_empty() && state.ha_compose.is_empty() {
+        language.t("haTypeHere").to_owned()
+    } else {
+        format!("{}{}|", state.ha_draft, state.ha_compose)
+    };
+    out.text(
+        shown,
+        Rect::new(300., 252., 1320., 40.),
+        text(28., 450, -0.02),
+        if state.ha_draft.is_empty() && state.ha_compose.is_empty() {
+            c(0xeeeeee, 0.4)
+        } else {
+            WHITE
+        },
+        false,
+    );
+}
+
 fn keyboard(out: &mut Scene, state: &State, assets: &Assets) {
     let language = state.preferences.language;
     let panel = Rect::new(350., 290., 1220., 530.);
@@ -2613,6 +3219,8 @@ fn keyboard(out: &mut Scene, state: &State, assets: &Assets) {
             TextField::Location => language.t("cityPostcode"),
             TextField::Name => language.t("greetingName"),
             TextField::InputName => language.t("inputName"),
+            TextField::HaUrl => language.t("haAddress"),
+            TextField::HaCode => language.t("haCode"),
             TextField::Apps => language.t("findApp"),
         },
         Rect::new(389., 324., 1000., 44.),

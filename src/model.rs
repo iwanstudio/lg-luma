@@ -88,6 +88,10 @@ pub enum InputMode {
     Off,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Preferences {
@@ -112,6 +116,18 @@ pub struct Preferences {
     pub temperature_unit: Unit,
     #[serde(deserialize_with = "crate::i18n::deserialize_language")]
     pub language: Language,
+    /// Number keys 0–9 mapped to an app id. Holding that key launches the app.
+    pub shortcuts: BTreeMap<String, String>,
+    /// Home Assistant origin, for example http://192.168.3.10:8123. Empty disables tiles.
+    pub ha_url: String,
+    /// Short code from the Luma Bridge integration. Not a full Home Assistant token.
+    pub ha_token: String,
+    /// Home-screen tiles. Off hides them without forgetting the address or the code.
+    #[serde(default = "default_true")]
+    pub show_ha: bool,
+    /// Entities pinned under the apps. None means every entity, until the first choice.
+    #[serde(default)]
+    pub ha_pins: Option<Vec<String>>,
 }
 
 impl Default for Preferences {
@@ -132,6 +148,11 @@ impl Default for Preferences {
             weather_location: None,
             temperature_unit: Unit::Celsius,
             language: Language::En,
+            shortcuts: BTreeMap::new(),
+            ha_url: String::new(),
+            ha_token: String::new(),
+            show_ha: true,
+            ha_pins: None,
         }
     }
 }
@@ -215,10 +236,77 @@ impl Preferences {
             .filter(|(_, name)| !name.is_empty())
             .take(128)
             .collect();
+        let mut seen_apps = HashSet::new();
+        self.shortcuts = std::mem::take(&mut self.shortcuts)
+            .into_iter()
+            .filter(|(digit, id)| {
+                digit.len() == 1
+                    && digit.bytes().all(|byte| byte.is_ascii_digit())
+                    && valid_app_id(id)
+            })
+            .filter(|(_, id)| seen_apps.insert(id.clone()))
+            .take(10)
+            .collect();
+        self.ha_url = clean_ha_url(&self.ha_url);
+        self.ha_token = clean_ha_token(&self.ha_token);
+    }
+
+    pub fn digit_for_app(&self, id: &str) -> Option<u8> {
+        self.shortcuts.iter().find_map(
+            |(digit, app)| {
+                if app == id { digit.parse().ok() } else { None }
+            },
+        )
+    }
+
+    /// One key per app, and one app per key. Returns false for an invalid id.
+    pub fn assign_shortcut(&mut self, digit: u8, id: &str) -> bool {
+        if digit > 9 || !valid_app_id(id) {
+            return false;
+        }
+        self.shortcuts.retain(|_, app| app != id);
+        self.shortcuts.insert(digit.to_string(), id.into());
+        true
+    }
+
+    pub fn clear_shortcut(&mut self, id: &str) -> bool {
+        let before = self.shortcuts.len();
+        self.shortcuts.retain(|_, app| app != id);
+        self.shortcuts.len() != before
     }
 }
 
 pub const INPUT_NAME_LIMIT: usize = 40;
+
+pub fn clean_ha_url(value: &str) -> String {
+    let value = value.trim().trim_end_matches('/').trim();
+    if value.is_empty() {
+        return String::new();
+    }
+    if value.len() > 200
+        || value.chars().any(|c| c.is_whitespace() || c.is_control())
+        || !(value.starts_with("http://") || value.starts_with("https://"))
+    {
+        return String::new();
+    }
+    value.to_owned()
+}
+
+pub fn clean_ha_token(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return String::new();
+    }
+    if (8..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+    {
+        value.to_owned()
+    } else {
+        String::new()
+    }
+}
 
 pub fn clean_input_name(name: &str) -> String {
     let clean: String = name.chars().filter(|c| !c.is_control()).collect();

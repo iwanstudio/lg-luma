@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 pub const WEATHER_SECTION: usize = 2;
 pub const INPUTS_SECTION: usize = 3;
 pub const SYSTEM_SECTION: usize = 4;
-pub const SECTION_COUNT: usize = 5;
+pub const BRIDGE_SECTION: usize = 5;
+pub const SECTION_COUNT: usize = 6;
 pub const APPS_COLUMNS: usize = 6;
 pub const HOME_STRIP_LEFT: f32 = 84.;
 // Six favourites in full and the seventh cut off and fading out at the right (Apple TV rows):
@@ -25,6 +26,7 @@ pub const HOME_FADE_RIGHT: f32 = 1910.;
 pub enum Page {
     Home,
     Apps,
+    Dom,
     Settings,
 }
 
@@ -68,6 +70,12 @@ pub enum Target {
     WeatherSearch,
     WeatherClear,
     WeatherResult(usize),
+    HaTile(String),
+    HaAddress,
+    HaCode,
+    HaPair,
+    HaPairCancel,
+    HaToggle,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -102,9 +110,11 @@ pub struct Control {
 #[derive(Clone, Debug)]
 pub enum Overlay {
     Options { id: String, restore: Target },
+    Shortcut { id: String, restore: Target },
     Recents { restore: Target },
     Keyboard,
     SystemKeyboard,
+    Camera { id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -126,6 +136,8 @@ pub enum TextField {
     Location,
     Name,
     InputName,
+    HaUrl,
+    HaCode,
 }
 
 #[derive(Clone, Copy)]
@@ -150,6 +162,11 @@ pub enum Effect {
     },
     Quit,
     Weather(weather::Command),
+    BridgeRefresh,
+    BridgePress(String),
+    StartPairing,
+    StopPairing,
+    Watch(Option<String>),
 }
 
 pub const KEYS: [&str; 40] = [
@@ -185,8 +202,46 @@ pub struct State {
     pub weather: weather::Weather,
     pub keyboard_field: TextField,
     pub greeting_name_draft: String,
+    pub ha_draft: String,
+    pub ha_compose: String,
+    pub tiles: Vec<crate::bridge::Tile>,
+    pub shots: std::collections::BTreeMap<String, String>,
+    pub shot_errors: std::collections::BTreeMap<String, String>,
+    pub ring_id: u64,
+    pub pending_watch: Option<String>,
+    pub bridge_error: Option<String>,
+    /// Pressed tile, the state we already showed, and when. A slow reply must not paint the old state back.
+    pub ha_hold: Option<(String, String, Instant)>,
+    pub pairing: Option<crate::pair::Offer>,
     pub input_name: String,
     pub recents: crate::recents::Recents,
+}
+
+fn nearest_row(controls: &[Control], x: f32, tiles: bool) -> Option<Target> {
+    let matches_kind = |target: &Target| {
+        if tiles {
+            matches!(target, Target::HaTile(_))
+        } else {
+            matches!(target, Target::Input(_))
+        }
+    };
+    let top = controls
+        .iter()
+        .filter(|control| matches_kind(&control.target))
+        .map(|control| control.rect.y)
+        .fold(f32::INFINITY, f32::min);
+    if !top.is_finite() {
+        return None;
+    }
+    controls
+        .iter()
+        .filter(|control| matches_kind(&control.target) && (control.rect.y - top).abs() < 1.)
+        .min_by(|a, b| {
+            (a.rect.center().0 - x)
+                .abs()
+                .total_cmp(&(b.rect.center().0 - x).abs())
+        })
+        .map(|control| control.target.clone())
 }
 
 impl State {
@@ -217,6 +272,16 @@ impl State {
             weather: weather::Weather::default(),
             keyboard_field: TextField::Apps,
             greeting_name_draft: String::new(),
+            ha_draft: String::new(),
+            ha_compose: String::new(),
+            tiles: Vec::new(),
+            shots: std::collections::BTreeMap::new(),
+            shot_errors: std::collections::BTreeMap::new(),
+            ring_id: 0,
+            pending_watch: None,
+            bridge_error: None,
+            ha_hold: None,
+            pairing: None,
             input_name: String::new(),
             recents: crate::recents::Recents::default(),
         }
@@ -273,7 +338,8 @@ impl State {
         match self.page {
             Page::Home => 0,
             Page::Apps => 1,
-            Page::Settings => 2,
+            Page::Dom => 2,
+            Page::Settings => 3,
         }
     }
 
@@ -294,7 +360,8 @@ impl State {
         self.weather.cancel_search();
         self.page = match index {
             1 => Page::Apps,
-            2 => Page::Settings,
+            2 => Page::Dom,
+            3 => Page::Settings,
             _ => Page::Home,
         };
         self.focus = Target::Nav(self.page_index());
@@ -305,6 +372,7 @@ impl State {
         self.query.clear();
         self.filter = 0;
         self.overlay = None;
+        self.pairing = None;
         self.moving = None;
         self.subpage = None;
         self.panel_started = None;
@@ -485,6 +553,12 @@ impl State {
                 .first()
                 .map(|app| Target::App(app.id.clone()))
                 .unwrap_or(Target::Filter(1)),
+            Page::Dom => self
+                .ordered_ids()
+                .into_iter()
+                .next()
+                .map(Target::HaTile)
+                .unwrap_or(Target::Nav(2)),
             Page::Settings => Target::Sidebar(0),
         }
     }
@@ -598,6 +672,7 @@ impl State {
                 .first()
                 .map(|input| Target::InputMode(input.id.clone()))
                 .unwrap_or(Target::Setting(3)),
+            BRIDGE_SECTION => Target::HaToggle,
             _ => Target::Setting(0),
         }
     }
@@ -638,6 +713,9 @@ impl State {
         }
         if matches!(self.overlay, Some(Overlay::SystemKeyboard)) {
             // The TV keyboard owns its arrows until Done/Back dismisses it.
+            return vec![];
+        }
+        if matches!(self.overlay, Some(Overlay::Camera { .. })) {
             return vec![];
         }
         if let Some(id) = self.moving.clone() {
@@ -688,23 +766,10 @@ impl State {
                                 .iter()
                                 .find(|control| control.target == self.focus)
                                 .map_or(960., |control| control.rect.center().0);
-                            let top = controls
+                            let kind_is_tile = controls
                                 .iter()
-                                .filter(|control| matches!(control.target, Target::Input(_)))
-                                .map(|control| control.rect.y)
-                                .fold(f32::INFINITY, f32::min);
-                            let next = controls
-                                .iter()
-                                .filter(|control| {
-                                    matches!(control.target, Target::Input(_))
-                                        && (control.rect.y - top).abs() < 1.
-                                })
-                                .min_by(|a, b| {
-                                    (a.rect.center().0 - x)
-                                        .abs()
-                                        .total_cmp(&(b.rect.center().0 - x).abs())
-                                })
-                                .map(|control| control.target.clone());
+                                .any(|control| matches!(control.target, Target::HaTile(_)));
+                            let next = nearest_row(controls, x, kind_is_tile);
                             if let Some(next) = next {
                                 self.focus(next, controls);
                             }
@@ -712,6 +777,42 @@ impl State {
                     }
                     return vec![];
                 }
+            }
+            if self.page == Page::Home
+                && let Target::HaTile(id) = &self.focus
+            {
+                let tiles = self.pinned_ids();
+                let index = tiles.iter().position(|tile| tile == id).unwrap_or(0);
+                match direction {
+                    Direction::Left | Direction::Right => {
+                        let next = if matches!(direction, Direction::Left) {
+                            index.saturating_sub(1)
+                        } else {
+                            (index + 1).min(tiles.len().saturating_sub(1))
+                        };
+                        if let Some(tile) = tiles.get(next) {
+                            self.focus(Target::HaTile(tile.clone()), controls);
+                        }
+                    }
+                    Direction::Up => {
+                        let apps = self.apps();
+                        if let Some(app) = apps.get(index.min(apps.len().saturating_sub(1))) {
+                            self.focus(Target::App(app.id.clone()), controls);
+                        } else {
+                            self.focus(Target::Nav(0), controls);
+                        }
+                    }
+                    Direction::Down => {
+                        let x = controls
+                            .iter()
+                            .find(|control| control.target == self.focus)
+                            .map_or(960., |control| control.rect.center().0);
+                        if let Some(next) = nearest_row(controls, x, false) {
+                            self.focus(next, controls);
+                        }
+                    }
+                }
+                return vec![];
             }
             let setting_rows = match self.subpage {
                 Some(Subpage::Greeting) => Some([Target::GreetingName, Target::GreetingNameClear]),
@@ -726,7 +827,7 @@ impl State {
                     Direction::Left => self.close_subpage(),
                     Direction::Up => self.focus(
                         if index == 0 {
-                            Target::Nav(2)
+                            Target::Nav(3)
                         } else {
                             rows[0].clone()
                         },
@@ -755,7 +856,7 @@ impl State {
                     Direction::Left => self.close_subpage(),
                     Direction::Up => self.focus(
                         if index == 0 {
-                            Target::Nav(2)
+                            Target::Nav(3)
                         } else {
                             Target::Choice(index - 1)
                         },
@@ -801,7 +902,7 @@ impl State {
                     }
                     Direction::Up => self.focus(
                         if index == 0 {
-                            Target::Nav(2)
+                            Target::Nav(3)
                         } else {
                             Target::Sidebar(index - 1)
                         },
@@ -841,11 +942,11 @@ impl State {
                 return vec![];
             }
             if self.focus == Target::Setting(0) && matches!(direction, Direction::Up) {
-                self.focus(Target::Nav(2), controls);
+                self.focus(Target::Nav(3), controls);
                 return vec![];
             }
             if self.focus == Target::WeatherToggle && matches!(direction, Direction::Up) {
-                self.focus(Target::Nav(2), controls);
+                self.focus(Target::Nav(3), controls);
                 return vec![];
             }
             if matches!(
@@ -864,7 +965,7 @@ impl State {
                             {
                                 Target::WeatherClear
                             } else {
-                                Target::Nav(2)
+                                Target::Nav(3)
                             },
                             controls,
                         );
@@ -925,7 +1026,7 @@ impl State {
             if let Target::Nav(index) = self.focus {
                 let next = match direction {
                     Direction::Left if index > 0 => Some(index - 1),
-                    Direction::Right if index < 2 => Some(index + 1),
+                    Direction::Right if index < 3 => Some(index + 1),
                     _ => None,
                 };
                 if let Some(next) = next {
@@ -979,6 +1080,38 @@ impl State {
                     self.section = 0;
                 }
                 self.focus(self.first_content(), controls);
+                return vec![];
+            }
+            if matches!(
+                self.focus,
+                Target::HaToggle | Target::HaPair | Target::HaAddress | Target::HaCode
+            ) {
+                let rows = [
+                    Target::HaToggle,
+                    Target::HaPair,
+                    Target::HaAddress,
+                    Target::HaCode,
+                ];
+                let index = rows
+                    .iter()
+                    .position(|target| *target == self.focus)
+                    .unwrap();
+                match direction {
+                    Direction::Left => self.focus(Target::Sidebar(BRIDGE_SECTION), controls),
+                    Direction::Up => self.focus(
+                        if index == 0 {
+                            Target::Nav(3)
+                        } else {
+                            rows[index - 1].clone()
+                        },
+                        controls,
+                    ),
+                    Direction::Down if index + 1 < rows.len() => {
+                        self.focus(rows[index + 1].clone(), controls)
+                    }
+                    Direction::Right => return self.activate(),
+                    _ => {}
+                }
                 return vec![];
             }
             if self.page == Page::Settings
@@ -1076,7 +1209,15 @@ impl State {
         }
     }
 
-    pub fn hold(&mut self) {
+    pub fn hold(&mut self) -> Vec<Effect> {
+        if self.overlay.is_some() {
+            return vec![];
+        }
+        if let Target::HaTile(id) = self.focus.clone()
+            && matches!(self.page, Page::Home | Page::Dom)
+        {
+            return self.toggle_pin(&id);
+        }
         if self.page == Page::Home && self.overlay.is_none() {
             if let Target::App(id) = &self.focus {
                 self.moving = Some(id.clone());
@@ -1086,6 +1227,137 @@ impl State {
         } else {
             self.options();
         }
+        vec![]
+    }
+
+    pub fn ordered_ids(&self) -> Vec<String> {
+        let mut indexed: Vec<(u8, usize, String)> = self
+            .tiles
+            .iter()
+            .enumerate()
+            .map(|(index, tile)| (tile.group(), index, tile.entity_id.clone()))
+            .collect();
+        indexed.sort_by_key(|(group, index, _)| (*group, *index));
+        indexed.into_iter().map(|(_, _, id)| id).collect()
+    }
+
+    pub fn pinned_ids(&self) -> Vec<String> {
+        match &self.preferences.ha_pins {
+            None => self
+                .tiles
+                .iter()
+                .map(|tile| tile.entity_id.clone())
+                .collect(),
+            Some(ids) => ids
+                .iter()
+                .filter(|id| self.tiles.iter().any(|tile| &tile.entity_id == *id))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    fn toggle_pin(&mut self, id: &str) -> Vec<Effect> {
+        let mut pins = self.pinned_ids();
+        let language = self.preferences.language;
+        if let Some(index) = pins.iter().position(|pin| pin == id) {
+            pins.remove(index);
+            self.notify(language.t("haUnpinned"));
+        } else {
+            pins.push(id.to_owned());
+            self.notify(language.t("haPinned"));
+        }
+        self.preferences.ha_pins = Some(pins);
+        if self.page == Page::Home
+            && let Target::HaTile(current) = self.focus.clone()
+            && !self.pinned_ids().iter().any(|pin| pin == &current)
+        {
+            self.focus = self
+                .pinned_ids()
+                .first()
+                .map(|pin| Target::HaTile(pin.clone()))
+                .unwrap_or(Target::Nav(0));
+        }
+        vec![Effect::Save]
+    }
+
+    fn anticipate_press(&mut self, id: &str) {
+        let Some(tile) = self.tiles.iter_mut().find(|tile| tile.entity_id == id) else {
+            return;
+        };
+        let next = match tile.state.as_str() {
+            "on" => "off",
+            "off" => "on",
+            "open" => "closed",
+            "closed" | "closing" => "open",
+            "locked" => "unlocked",
+            "unlocked" => "locked",
+            _ => return,
+        };
+        tile.state = next.into();
+        self.ha_hold = Some((id.into(), next.into(), Instant::now()));
+        self.dirty = true;
+    }
+
+    pub fn launch_shortcut(&mut self, digit: u8) -> Vec<Effect> {
+        if self.text_input_active() || self.overlay.is_some() || self.moving.is_some() {
+            return vec![];
+        }
+        let Some(id) = self.preferences.shortcuts.get(&digit.to_string()).cloned() else {
+            return vec![];
+        };
+        if self.inventory.apps.iter().any(|app| app.id == id) {
+            vec![Effect::Launch(id)]
+        } else {
+            vec![]
+        }
+    }
+
+    pub fn activate_shortcut_digit(&mut self, digit: u8) -> Vec<Effect> {
+        let Some(Overlay::Shortcut { id, restore }) = self.overlay.clone() else {
+            return vec![];
+        };
+        const DIGITS: [u8; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
+        let Some(index) = DIGITS.iter().position(|item| *item == digit) else {
+            return vec![];
+        };
+        self.finish_shortcut(index, id, restore)
+    }
+
+    fn finish_shortcut(&mut self, index: usize, id: String, restore: Target) -> Vec<Effect> {
+        const DIGITS: [u8; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
+        self.overlay = None;
+        self.panel_started = None;
+        self.focus = restore;
+        self.pointer = false;
+        self.dirty = true;
+        let title = self
+            .inventory
+            .apps
+            .iter()
+            .find(|app| app.id == id)
+            .map_or(id.clone(), |app| app.title.clone());
+        if index == 10 {
+            if self.preferences.clear_shortcut(&id) {
+                self.notify(
+                    self.preferences
+                        .language
+                        .format("shortcutCleared", &[("app", &title)]),
+                );
+                return vec![Effect::Save];
+            }
+            return vec![];
+        }
+        let Some(digit) = DIGITS.get(index).copied() else {
+            return vec![];
+        };
+        if !self.preferences.assign_shortcut(digit, &id) {
+            return vec![];
+        }
+        self.notify(self.preferences.language.format(
+            "shortcutSet",
+            &[("key", &digit.to_string()), ("app", &title)],
+        ));
+        vec![Effect::Save]
     }
 
     pub fn text(&mut self, text: &str) {
@@ -1121,6 +1393,22 @@ impl State {
                 self.dirty = true;
                 return;
             }
+            if matches!(self.keyboard_field, TextField::HaUrl | TextField::HaCode) {
+                let limit: usize = if self.keyboard_field == TextField::HaUrl {
+                    200
+                } else {
+                    64
+                };
+                let length = self.ha_draft.chars().count();
+                self.ha_draft.extend(
+                    text.chars()
+                        .filter(|c| !c.is_control())
+                        .take(limit.saturating_sub(length)),
+                );
+                self.ha_compose.clear();
+                self.dirty = true;
+                return;
+            }
             self.query.extend(
                 text.chars()
                     .filter(|c| !c.is_control())
@@ -1141,6 +1429,8 @@ impl State {
                 self.greeting_name_draft.pop();
             } else if self.keyboard_field == TextField::InputName {
                 self.input_name.pop();
+            } else if matches!(self.keyboard_field, TextField::HaUrl | TextField::HaCode) {
+                self.ha_draft.pop();
             } else {
                 self.query.pop();
             }
@@ -1167,6 +1457,101 @@ impl State {
         vec![]
     }
 
+    fn commit_ha(&mut self) -> Vec<Effect> {
+        if !self.ha_compose.is_empty() {
+            self.ha_draft
+                .push_str(&std::mem::take(&mut self.ha_compose));
+        }
+        let draft = std::mem::take(&mut self.ha_draft);
+        let typed = draft.trim();
+        if typed.is_empty() {
+            return vec![];
+        }
+        if self.keyboard_field == TextField::HaUrl {
+            let clean = crate::model::clean_ha_url(typed);
+            if clean.is_empty() {
+                self.notify(self.preferences.language.t("haInvalidAddress"));
+                return vec![];
+            }
+            if self.preferences.ha_url != clean {
+                self.preferences.ha_url = clean;
+                return vec![Effect::Save, Effect::BridgeRefresh];
+            }
+        } else if self.keyboard_field == TextField::HaCode {
+            let clean = crate::model::clean_ha_token(typed);
+            if clean.is_empty() {
+                self.notify(self.preferences.language.t("haInvalidCode"));
+                return vec![];
+            }
+            if self.preferences.ha_token != clean {
+                self.preferences.ha_token = clean;
+                return vec![Effect::Save, Effect::BridgeRefresh];
+            }
+        }
+        vec![]
+    }
+
+    pub fn apply_bridge(&mut self, update: crate::bridge::Update) {
+        match update {
+            crate::bridge::Update::Tiles(mut tiles) => {
+                self.bridge_error = None;
+                if let Some((id, expect, started)) = self.ha_hold.clone() {
+                    if started.elapsed() < Duration::from_secs(4) {
+                        if let Some(tile) = tiles.iter_mut().find(|tile| tile.entity_id == id) {
+                            if tile.state == expect {
+                                self.ha_hold = None;
+                            } else {
+                                tile.state = expect;
+                            }
+                        }
+                    } else {
+                        self.ha_hold = None;
+                    }
+                }
+                if self.tiles != tiles {
+                    if let Target::HaTile(id) = &self.focus {
+                        if !tiles.iter().any(|tile| &tile.entity_id == id) {
+                            self.focus = Target::Nav(0);
+                        }
+                    }
+                    self.tiles = tiles;
+                    self.dirty = true;
+                }
+            }
+            crate::bridge::Update::Failed(error) => {
+                if self.bridge_error.as_deref() != Some(error.as_str()) {
+                    self.bridge_error = Some(error);
+                    self.dirty = true;
+                }
+            }
+            crate::bridge::Update::Shot { entity_id, path } => {
+                self.shot_errors.remove(&entity_id);
+                self.shots.insert(entity_id, path);
+                self.dirty = true;
+            }
+            crate::bridge::Update::ShotFailed { entity_id, error } => {
+                if self
+                    .shot_errors
+                    .get(&entity_id)
+                    .is_none_or(|old| old != &error)
+                {
+                    self.shot_errors.insert(entity_id, error);
+                    self.dirty = true;
+                }
+            }
+            crate::bridge::Update::Ring { id, camera, title } => {
+                if id > self.ring_id && !camera.is_empty() {
+                    self.ring_id = id;
+                    self.moving = None;
+                    self.overlay = Some(Overlay::Camera { id: camera.clone() });
+                    self.pending_watch = Some(camera);
+                    self.notify(title);
+                    self.dirty = true;
+                }
+            }
+        }
+    }
+
     fn commit_text_input(&mut self) -> Vec<Effect> {
         if self.keyboard_field == TextField::Name {
             let name = std::mem::take(&mut self.greeting_name_draft);
@@ -1177,6 +1562,9 @@ impl State {
                 return vec![Effect::Save];
             }
             return vec![];
+        }
+        if matches!(self.keyboard_field, TextField::HaUrl | TextField::HaCode) {
+            return self.commit_ha();
         }
         self.commit_input_name()
     }
@@ -1221,10 +1609,30 @@ impl State {
             self.greeting_name_draft = query;
         } else if self.keyboard_field == TextField::InputName {
             self.input_name = query;
+        } else if matches!(self.keyboard_field, TextField::HaUrl | TextField::HaCode) {
+            self.ha_draft = query;
         } else {
             self.query = query;
             self.scroll = 0.;
         }
+        self.dirty = true;
+    }
+
+    pub fn set_ha_compose(&mut self, text: &str) {
+        if !matches!(self.keyboard_field, TextField::HaUrl | TextField::HaCode) {
+            return;
+        }
+        let limit: usize = if self.keyboard_field == TextField::HaUrl {
+            200
+        } else {
+            64
+        };
+        let room = limit.saturating_sub(self.ha_draft.chars().count());
+        self.ha_compose = text
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(room)
+            .collect();
         self.dirty = true;
     }
 
@@ -1233,6 +1641,7 @@ impl State {
             TextField::Location => &self.weather.query,
             TextField::Name => &self.greeting_name_draft,
             TextField::InputName => &self.input_name,
+            TextField::HaUrl | TextField::HaCode => &self.ha_draft,
             TextField::Apps => &self.query,
         }
     }
@@ -1246,6 +1655,10 @@ impl State {
             // The TV keyboard starts empty, so a new name replaces the old one.
             self.input_name.clear();
         }
+        if matches!(field, TextField::HaUrl | TextField::HaCode) {
+            self.ha_draft.clear();
+            self.ha_compose.clear();
+        }
         if cfg!(all(
             feature = "webos",
             target_os = "linux",
@@ -1256,6 +1669,8 @@ impl State {
                 TextField::Location => Target::WeatherQuery,
                 TextField::Name => Target::GreetingName,
                 TextField::InputName => Target::InputRename,
+                TextField::HaUrl => Target::HaAddress,
+                TextField::HaCode => Target::HaCode,
                 TextField::Apps => Target::Search,
             };
             self.panel_started = None;
@@ -1284,6 +1699,8 @@ impl State {
             TextField::Location => Target::WeatherSearch,
             TextField::Name => Target::GreetingName,
             TextField::InputName => Target::InputRename,
+            TextField::HaUrl => Target::HaAddress,
+            TextField::HaCode => Target::HaCode,
             TextField::Apps => Target::Search,
         }
     }
@@ -1314,6 +1731,30 @@ impl State {
             Target::App(id) | Target::Input(id) if !self.launching => {
                 return vec![Effect::Launch(id)];
             }
+            Target::HaTile(id) if !self.launching => {
+                if self
+                    .tiles
+                    .iter()
+                    .any(|tile| tile.entity_id == id && tile.domain == "camera")
+                {
+                    self.overlay = Some(Overlay::Camera { id: id.clone() });
+                    self.dirty = true;
+                    return vec![Effect::Watch(Some(id))];
+                }
+                self.anticipate_press(&id);
+                return vec![Effect::BridgePress(id)];
+            }
+            Target::HaAddress => self.open_keyboard(TextField::HaUrl),
+            Target::HaCode => self.open_keyboard(TextField::HaCode),
+            Target::HaPair => return vec![Effect::StartPairing],
+            Target::HaPairCancel => {
+                self.focus = Target::HaPair;
+                return vec![Effect::StopPairing];
+            }
+            Target::HaToggle => {
+                self.preferences.show_ha = !self.preferences.show_ha;
+                return vec![Effect::Save];
+            }
             Target::Filter(index) => {
                 self.filter = if self.filter == index { 0 } else { index };
                 self.scroll = 0.;
@@ -1332,7 +1773,7 @@ impl State {
                 self.open_keyboard(TextField::Apps);
             }
             Target::WeatherConfigure => {
-                self.open(2);
+                self.open(3);
                 self.section = WEATHER_SECTION;
                 self.open_location();
                 self.open_keyboard(TextField::Location);
@@ -1527,6 +1968,25 @@ impl State {
                 return vec![Effect::Save];
             }
             Target::Option(index) => {
+                if let Some(Overlay::Shortcut { id, restore }) = self.overlay.clone() {
+                    return self.finish_shortcut(index, id, restore);
+                }
+                if index == 2 {
+                    if let Some(Overlay::Options { id, restore }) = self.overlay.clone() {
+                        let focus = self
+                            .preferences
+                            .digit_for_app(&id)
+                            .map(|digit| if digit == 0 { 9 } else { digit as usize - 1 })
+                            .unwrap_or(0);
+                        self.overlay = Some(Overlay::Shortcut { id, restore });
+                        self.focus = Target::Option(focus);
+                        self.dirty = true;
+                        if !self.preferences.reduced_motion {
+                            self.panel_started = Some(Instant::now());
+                        }
+                        return vec![];
+                    }
+                }
                 let Some(Overlay::Options { id, restore }) = self.overlay.take() else {
                     return vec![];
                 };
@@ -1602,6 +2062,7 @@ impl State {
                     TextField::Location => self.weather.edit(String::new()),
                     TextField::Name => self.greeting_name_draft.clear(),
                     TextField::InputName => self.input_name.clear(),
+                    TextField::HaUrl | TextField::HaCode => self.ha_draft.clear(),
                     TextField::Apps => self.query.clear(),
                 },
                 "Done" => {
@@ -1634,6 +2095,17 @@ impl State {
                     self.recents.closing_focus = None;
                 }
             }
+            if let Overlay::Camera { .. } = overlay {
+                return vec![Effect::Watch(None)];
+            }
+            if let Overlay::Shortcut { id, restore } = overlay {
+                self.overlay = Some(Overlay::Options { id, restore });
+                self.focus = Target::Option(2);
+                if !self.preferences.reduced_motion {
+                    self.panel_started = Some(Instant::now());
+                }
+                return vec![];
+            }
             if let Overlay::Options { restore, .. } | Overlay::Recents { restore } = overlay {
                 self.focus = restore;
                 self.recents.pending = None;
@@ -1643,13 +2115,18 @@ impl State {
             self.focus = self.keyboard_return();
             return self.commit_text_input();
         }
+        if self.pairing.is_some() && self.page == Page::Settings && self.section == BRIDGE_SECTION {
+            self.pairing = None;
+            self.focus = Target::HaPair;
+            return vec![Effect::StopPairing];
+        }
         if self.page == Page::Settings && self.subpage.is_some() {
             self.close_subpage();
             return vec![];
         }
         if self.page == Page::Settings && !matches!(self.focus, Target::Nav(_)) {
             if matches!(self.focus, Target::Sidebar(_)) {
-                self.focus = Target::Nav(2);
+                self.focus = Target::Nav(3);
             } else {
                 self.focus = Target::Sidebar(self.section);
             }
