@@ -1534,3 +1534,36 @@ fn lock_pin_is_drawn_as_dots_never_digits() {
         crate::renderer::Draw::Text(value, ..) if matches!(value.as_str(), "427" | "4" | "2" | "7")
     )));
 }
+
+#[test]
+fn lock_update_with_denied_clears_the_status_line() {
+    let mut state = locked_state();
+    state.apply_bridge(crate::bridge::Update::LockResult {
+        request: true,
+        ok: true,
+        retry_after: 120,
+        error: String::new(),
+    });
+    assert_eq!(
+        state.lock_line(),
+        state.preferences.language.t("lockRequestSent")
+    );
+    state.apply_bridge(crate::bridge::Update::Lock(crate::bridge::LockState {
+        locked: true,
+        denied: true,
+        ..Default::default()
+    }));
+    assert_eq!(
+        state.lock_line(),
+        state.preferences.language.t("lockDenied")
+    );
+}
+
+#[test]
+fn lock_status_expires_on_tick() {
+    let mut state = locked_state();
+    state.lock_status = "Zły PIN".into();
+    state.lock_status_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(9));
+    state.tick();
+    assert!(state.lock_status.is_empty());
+}

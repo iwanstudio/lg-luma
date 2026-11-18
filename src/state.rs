@@ -223,6 +223,7 @@ pub struct State {
     pub lock: crate::bridge::LockState,
     pub lock_pin: String,
     pub lock_status: String,
+    pub lock_status_at: Option<Instant>,
 }
 
 pub const LOCK_PIN_MAX: usize = 8;
@@ -297,6 +298,7 @@ impl State {
             lock: crate::bridge::LockState::default(),
             lock_pin: String::new(),
             lock_status: String::new(),
+            lock_status_at: None,
         }
     }
 
@@ -351,6 +353,14 @@ impl State {
     }
 
     pub fn tick(&mut self) {
+        if self
+            .lock_status_at
+            .is_some_and(|at| at.elapsed() > Duration::from_secs(8))
+        {
+            self.lock_status.clear();
+            self.lock_status_at = None;
+            self.dirty = true;
+        }
         let recents_open = self.recents_open();
         if recents_open || self.recents.visibility > 0. {
             self.dirty |= self.recents.animate(
@@ -1614,6 +1624,10 @@ impl State {
                 if !lock.notice.is_empty() && lock.notice != self.lock.notice {
                     self.notify(lock.notice.clone());
                 }
+                if lock.denied != self.lock.denied || lock.pending != self.lock.pending {
+                    self.lock_status.clear();
+                    self.lock_status_at = None;
+                }
                 if self.lock != lock {
                     self.lock = lock;
                 }
@@ -1644,6 +1658,7 @@ impl State {
                 } else {
                     language.t("lockWrongPin").to_owned()
                 };
+                self.lock_status_at = (!self.lock_status.is_empty()).then(Instant::now);
                 if !request {
                     self.lock_pin.clear();
                 }
