@@ -295,7 +295,10 @@ fn press(agent: &ureq::Agent, url: &str, token: &str, entity_id: &str) -> Result
     if !response.status().is_success() {
         return Err("Home Assistant odrzucił naciśnięcie".into());
     }
-    let _ = std::io::copy(&mut response.body_mut().as_reader().take(1024), &mut std::io::sink());
+    let _ = std::io::copy(
+        &mut response.body_mut().as_reader().take(1024),
+        &mut std::io::sink(),
+    );
     Ok(())
 }
 
