@@ -1663,3 +1663,18 @@ fn lock_animation_keeps_redrawing_unless_motion_is_reduced() {
     state.tick();
     assert!(!state.dirty);
 }
+
+#[test]
+fn lock_animation_runs_every_frame_unless_motion_is_reduced() {
+    let mut state = locked_state();
+    assert!(state.animating());
+    state.preferences.reduced_motion = true;
+    assert!(!state.animating());
+    assert!(!ready().animating());
+}
+
+#[test]
+fn lock_scene_is_small_because_the_page_behind_is_not_built() {
+    let state = locked_state();
+    assert!(scene(&state).draw.len() < 80);
+}

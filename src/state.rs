@@ -432,6 +432,7 @@ impl State {
                 || (!self.pointer && self.recents.position != self.recents.selected as f32)))
             || self.previous_background.is_some()
             || self.panel_started.is_some()
+            || (self.locked() && !self.preferences.reduced_motion)
             || (!self.preferences.reduced_motion
                 && self
                     .notice

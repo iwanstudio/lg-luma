@@ -279,6 +279,11 @@ pub fn scene_with_pill(
     now: OffsetDateTime,
 ) -> Scene {
     let mut out = Scene::new();
+    if state.locked() {
+        // Nothing behind the lock screen shows, so do not rebuild it every frame.
+        lock_screen(&mut out, state);
+        return out;
+    }
     if let Some((previous, start)) = &state.previous_background {
         out.image(
             assets.path(format!("wallpapers/{previous}.jpg")),
