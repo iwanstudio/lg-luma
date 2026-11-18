@@ -224,6 +224,7 @@ pub struct State {
     pub lock_pin: String,
     pub lock_status: String,
     pub lock_status_at: Option<Instant>,
+    pub lock_since: Option<Instant>,
 }
 
 pub const LOCK_PIN_MAX: usize = 8;
@@ -299,6 +300,7 @@ impl State {
             lock_pin: String::new(),
             lock_status: String::new(),
             lock_status_at: None,
+            lock_since: None,
         }
     }
 
@@ -358,6 +360,10 @@ impl State {
     }
 
     pub fn tick(&mut self) {
+        if self.locked() && !self.preferences.reduced_motion {
+            // The toys on the lock screen keep moving.
+            self.dirty = true;
+        }
         if self
             .lock_status_at
             .is_some_and(|at| at.elapsed() > Duration::from_secs(8))
@@ -1612,6 +1618,7 @@ impl State {
                 if lock.locked {
                     if !self.locked() {
                         self.overlay = Some(Overlay::Lock);
+                        self.lock_since = Some(Instant::now());
                         self.moving = None;
                         self.pressed = None;
                         self.lock_pin.clear();
@@ -1622,6 +1629,7 @@ impl State {
                     }
                 } else if self.locked() {
                     self.overlay = None;
+                    self.lock_since = None;
                     self.lock_pin.clear();
                     self.lock_status.clear();
                     self.focus = Target::Nav(0);

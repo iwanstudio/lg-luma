@@ -1915,5 +1915,14 @@
     "pt": "Sem ligação ao Home Assistant",
     "it": "Nessuna connessione a Home Assistant",
     "pl": "Brak połączenia z Home Assistant"
+  },
+  "lockPlay": {
+    "en": "Time to play! Play together or with your toys.",
+    "de": "Zeit zum Spielen! Spielt zusammen oder mit euren Spielsachen.",
+    "es": "¡Hora de jugar! Jugad juntos o con vuestros juguetes.",
+    "zh": "游戏时间！一起玩，或者玩玩具吧。",
+    "pt": "Hora de brincar! Brinquem juntos ou com os vossos brinquedos.",
+    "it": "È ora di giocare! Giocate insieme o con i vostri giocattoli.",
+    "pl": "Czas na zabawę! Pobawcie się razem albo zabawkami."
   }
 }

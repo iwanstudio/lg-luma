@@ -900,10 +900,50 @@ fn camera_cards(out: &mut Scene, state: &State, tiles: &[crate::bridge::Tile], y
     tiles.len().div_ceil(3) as f32 * 380.
 }
 
+/// Soft bubbles drift up behind the lock panel and a row of toy blocks hops below it,
+/// a nudge to go and play instead of watching TV.
+fn lock_play(out: &mut Scene, seconds: f32) {
+    const COLORS: [u32; 6] = [0xff6b6b, 0xffd166, 0x06d6a0, 0x4cc9f0, 0xb388eb, 0xff9f1c];
+    for index in 0..14 {
+        let speed = 30. + (index % 5) as f32 * 14.;
+        let radius = 18. + (index % 4) as f32 * 14.;
+        let travel = 1080. + 2. * radius;
+        let y = 1080. + radius - (seconds * speed + index as f32 * 97.) % travel;
+        let x = 90. + index as f32 * 132. + (seconds * 0.6 + index as f32).sin() * 26.;
+        out.shape(
+            Rect::new(x - radius, y - radius, radius * 2., radius * 2.),
+            radius,
+            c(COLORS[index % 6], 0.22),
+        );
+    }
+    for index in 0..7 {
+        let hop = (seconds * 3.2 - index as f32 * 0.55).sin().max(0.) * 46.;
+        let x = 592. + index as f32 * 110.;
+        out.shape(
+            Rect::new(x, 960. - hop, 76., 76.),
+            16.,
+            c(COLORS[index % 6], 0.95),
+        );
+        out.shape(
+            Rect::new(x + 12., 972. - hop, 24., 10.),
+            5.,
+            c(0xffffff, 0.35),
+        );
+    }
+}
+
 /// Full-screen parental lock: the reason, eight PIN dots and a button that asks the parents.
 fn lock_screen(out: &mut Scene, state: &State) {
     let language = state.preferences.language;
     out.shape(Rect::new(0., 0., 1920., 1080.), 0., c(0x080b12, 1.));
+    let seconds = if state.preferences.reduced_motion {
+        0.
+    } else {
+        state
+            .lock_since
+            .map_or(0., |since| since.elapsed().as_secs_f32())
+    };
+    lock_play(out, seconds);
     let panel = Rect::new(460., 190., 1000., 700.);
     out.shape(panel, 28., c(0x101318, 1.));
     out.border(panel, 28., 1., c(0xffffff, 0.12));
@@ -974,6 +1014,13 @@ fn lock_screen(out: &mut Scene, state: &State) {
         true,
     );
     out.control(Target::LockRequest, button, false);
+    out.text(
+        language.t("lockPlay"),
+        Rect::new(500., 815., 920., 36.),
+        text(24., 500, 0.),
+        c(0x9fe3a5, 0.95),
+        true,
+    );
     out.text(
         state.lock_line(),
         Rect::new(500., 760., 920., 40.),

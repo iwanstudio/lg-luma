@@ -1606,3 +1606,26 @@ fn lock_screen_draws_one_dot_per_pin_digit() {
     assert_eq!(dots(&locked_with_pin_length(6)), 6);
     assert_eq!(dots(&locked_with_pin_length(0)), 8);
 }
+
+#[test]
+fn lock_screen_invites_the_children_to_play() {
+    let state = locked_state();
+    let message = state.preferences.language.t("lockPlay").to_owned();
+    assert_ne!(message, "lockPlay");
+    assert!(scene(&state).draw.iter().any(|draw| matches!(
+        draw,
+        crate::renderer::Draw::Text(value, ..) if *value == message
+    )));
+}
+
+#[test]
+fn lock_animation_keeps_redrawing_unless_motion_is_reduced() {
+    let mut state = locked_state();
+    state.dirty = false;
+    state.tick();
+    assert!(state.dirty);
+    state.preferences.reduced_motion = true;
+    state.dirty = false;
+    state.tick();
+    assert!(!state.dirty);
+}
