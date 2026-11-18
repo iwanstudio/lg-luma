@@ -10,7 +10,7 @@ use std::{
         mpsc::{self, Receiver, Sender},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const LIMIT: usize = 64 * 1024;
@@ -57,6 +57,18 @@ impl Tile {
     }
 }
 
+/// What Home Assistant says about the parental lock. The default is "not locked".
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LockState {
+    pub locked: bool,
+    pub reason: String,
+    pub until: String,
+    pub pending: bool,
+    pub denied: bool,
+    pub blocked_apps: Vec<String>,
+    pub notice: String,
+}
+
 #[derive(Debug)]
 pub enum Update {
     Tiles(Vec<Tile>),
@@ -74,12 +86,22 @@ pub enum Update {
         entity_id: String,
         error: String,
     },
+    Lock(LockState),
+    /// The answer to a PIN try (`request` false) or to a request for more time (`request` true).
+    LockResult {
+        request: bool,
+        ok: bool,
+        retry_after: u64,
+        error: String,
+    },
 }
 
 enum Job {
     Configure { url: String, token: String },
     Press(String),
     Watch(Option<String>),
+    LockRequest,
+    LockUnlock(String),
     Stop,
 }
 
@@ -145,6 +167,14 @@ impl Service {
     pub fn watch(&self, entity_id: Option<String>) {
         let _ = self.jobs.send(Job::Watch(entity_id));
     }
+
+    pub fn lock_request(&self) {
+        let _ = self.jobs.send(Job::LockRequest);
+    }
+
+    pub fn lock_unlock(&self, pin: String) {
+        let _ = self.jobs.send(Job::LockUnlock(pin));
+    }
 }
 
 impl Drop for Service {
@@ -167,6 +197,8 @@ fn worker(jobs: Receiver<Job>, updates: Sender<Update>) {
     let mut thumb = 0usize;
     let mut watch: Option<String> = None;
     let mut last_ring = 0u64;
+    let mut last_lock: Option<Instant> = None;
+    let mut lock_poll = LockPoll::default();
     loop {
         let wait = if watch.is_some() {
             Duration::from_secs(1)
@@ -197,6 +229,20 @@ fn worker(jobs: Receiver<Job>, updates: Sender<Update>) {
                             camera: ring.camera,
                             title: ring.title,
                         });
+                    }
+                    if last_lock.is_none_or(|at| at.elapsed() >= LOCK_EVERY) {
+                        last_lock = Some(Instant::now());
+                        match poll_lock(&agent, &url, &token) {
+                            Ok(state) => {
+                                lock_poll.record(true);
+                                let _ = updates.send(Update::Lock(state));
+                            }
+                            Err(_) => {
+                                if let Some(state) = lock_poll.record(false) {
+                                    let _ = updates.send(Update::Lock(state));
+                                }
+                            }
+                        }
                     }
                     if !cameras.is_empty() {
                         let id = cameras[thumb % cameras.len()].clone();
@@ -234,6 +280,25 @@ fn worker(jobs: Receiver<Job>, updates: Sender<Update>) {
                 } else {
                     cameras.clear();
                     let _ = updates.send(Update::Tiles(Vec::new()));
+                    let _ = updates.send(Update::Lock(LockState::default()));
+                }
+            }
+            Job::LockUnlock(pin) => {
+                if url.is_empty() || token.is_empty() {
+                    continue;
+                }
+                let _ = updates.send(lock_unlock(&agent, &url, &token, &pin));
+                if let Ok(state) = poll_lock(&agent, &url, &token) {
+                    let _ = updates.send(Update::Lock(state));
+                }
+            }
+            Job::LockRequest => {
+                if url.is_empty() || token.is_empty() {
+                    continue;
+                }
+                let _ = updates.send(lock_request(&agent, &url, &token));
+                if let Ok(state) = poll_lock(&agent, &url, &token) {
+                    let _ = updates.send(Update::Lock(state));
                 }
             }
             Job::Press(entity_id) => {
@@ -414,6 +479,161 @@ fn save_snapshot(
     Ok(path.to_string_lossy().into_owned())
 }
 
+const LOCK_EVERY: Duration = Duration::from_secs(5);
+const PIN_MAX: usize = 8;
+
+/// Counts failed lock polls. Three in a row open the TV (fail-open), once.
+#[derive(Default)]
+struct LockPoll {
+    failures: u8,
+}
+
+impl LockPoll {
+    fn record(&mut self, ok: bool) -> Option<LockState> {
+        if ok {
+            self.failures = 0;
+            return None;
+        }
+        self.failures = self.failures.saturating_add(1);
+        (self.failures == 3).then(LockState::default)
+    }
+}
+
+fn parse_lock(value: &serde_json::Value) -> Option<LockState> {
+    let object = value.as_object()?;
+    let text = |key: &str| -> String {
+        object
+            .get(key)
+            .and_then(|item| item.as_str())
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect()
+    };
+    let flag = |key: &str| {
+        object
+            .get(key)
+            .and_then(|item| item.as_bool())
+            .unwrap_or(false)
+    };
+    let blocked_apps: Vec<String> = object
+        .get("blocked_apps")
+        .and_then(|item| item.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .take(16)
+                .map(|name| name.chars().take(60).collect::<String>())
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(LockState {
+        locked: flag("locked"),
+        reason: text("reason"),
+        until: text("until"),
+        pending: flag("pending"),
+        denied: flag("denied"),
+        blocked_apps,
+        notice: text("notice"),
+    })
+}
+
+fn poll_lock(agent: &ureq::Agent, url: &str, token: &str) -> Result<LockState, String> {
+    let value = get_json(agent, &format!("{url}/api/luma_bridge/lock"), token)?;
+    parse_lock(&value).ok_or_else(|| "Home Assistant zwrócił nieczytelny stan blokady".to_owned())
+}
+
+fn valid_pin(pin: &str) -> bool {
+    !pin.is_empty() && pin.len() <= PIN_MAX && pin.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn post_json(
+    agent: &ureq::Agent,
+    endpoint: &str,
+    token: &str,
+    body: &str,
+) -> Result<serde_json::Value, String> {
+    let mut response = agent
+        .post(endpoint)
+        .header("Authorization", &format!("Bearer {token}"))
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .header("User-Agent", "LumaNative")
+        .send(body.as_bytes())
+        .map_err(|_| "Nie ma połączenia z Home Assistant".to_owned())?;
+    if !response.status().is_success() {
+        return Err("Home Assistant nie przyjął żądania".into());
+    }
+    let mut bytes = Vec::new();
+    response
+        .body_mut()
+        .as_reader()
+        .take(LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Nie dało się odczytać odpowiedzi".to_owned())?;
+    if bytes.len() > LIMIT {
+        return Err("Odpowiedź Home Assistant jest za duża".into());
+    }
+    serde_json::from_slice(&bytes).map_err(|_| "Home Assistant zwrócił nieczytelne dane".into())
+}
+
+fn lock_unlock(agent: &ureq::Agent, url: &str, token: &str, pin: &str) -> Update {
+    if !valid_pin(pin) {
+        return Update::LockResult {
+            request: false,
+            ok: false,
+            retry_after: 0,
+            error: String::new(),
+        };
+    }
+    let body = serde_json::json!({ "pin": pin }).to_string();
+    match post_json(
+        agent,
+        &format!("{url}/api/luma_bridge/lock/unlock"),
+        token,
+        &body,
+    ) {
+        Ok(value) => Update::LockResult {
+            request: false,
+            ok: value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+            retry_after: value
+                .get("retry_after")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            error: String::new(),
+        },
+        Err(error) => Update::LockResult {
+            request: false,
+            ok: false,
+            retry_after: 0,
+            error,
+        },
+    }
+}
+
+fn lock_request(agent: &ureq::Agent, url: &str, token: &str) -> Update {
+    match post_json(
+        agent,
+        &format!("{url}/api/luma_bridge/lock/request"),
+        token,
+        "{}",
+    ) {
+        Ok(value) => Update::LockResult {
+            request: true,
+            ok: value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+            retry_after: value.get("wait").and_then(|v| v.as_u64()).unwrap_or(0),
+            error: String::new(),
+        },
+        Err(error) => Update::LockResult {
+            request: true,
+            ok: false,
+            retry_after: 0,
+            error,
+        },
+    }
+}
+
 struct Ring {
     id: u64,
     camera: String,
@@ -515,5 +735,63 @@ impl RawTile {
             },
             rgb: self.rgb,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_lock_reads_contract() {
+        let state = parse_lock(&json!({
+            "locked": true,
+            "reason": "Czas bez telewizora do 19:00",
+            "until": "19:00",
+            "pending": true,
+            "denied": false,
+            "blocked_apps": ["Netflix", "YouTube"],
+            "notice": "Netflix: limit na dziś wyczerpany"
+        }))
+        .unwrap();
+        assert!(state.locked && state.pending && !state.denied);
+        assert_eq!(state.reason, "Czas bez telewizora do 19:00");
+        assert_eq!(state.until, "19:00");
+        assert_eq!(state.blocked_apps, vec!["Netflix", "YouTube"]);
+        assert_eq!(state.notice, "Netflix: limit na dziś wyczerpany");
+    }
+
+    #[test]
+    fn parse_lock_missing_fields_defaults_unlocked() {
+        assert_eq!(parse_lock(&json!({})).unwrap(), LockState::default());
+        assert!(!parse_lock(&json!({ "locked": "yes" })).unwrap().locked);
+    }
+
+    #[test]
+    fn parse_lock_rejects_non_object() {
+        assert!(parse_lock(&json!([1, 2])).is_none());
+        assert!(parse_lock(&json!("locked")).is_none());
+    }
+
+    #[test]
+    fn three_failures_make_fail_open() {
+        let mut poll = LockPoll::default();
+        assert!(poll.record(false).is_none());
+        assert!(poll.record(false).is_none());
+        assert_eq!(poll.record(false), Some(LockState::default()));
+        assert!(poll.record(false).is_none());
+        poll.record(true);
+        assert!(poll.record(false).is_none());
+    }
+
+    #[test]
+    fn pins_are_one_to_eight_digits() {
+        assert!(valid_pin("0042"));
+        assert!(valid_pin("12345678"));
+        assert!(!valid_pin(""));
+        assert!(!valid_pin("123456789"));
+        assert!(!valid_pin("12a4"));
+        assert!(!valid_pin(" 1234"));
     }
 }

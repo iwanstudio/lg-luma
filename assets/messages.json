@@ -1843,5 +1843,77 @@
     "pt": "Voltar fecha a imagem",
     "it": "Indietro chiude l'immagine",
     "pl": "Wstecz zamyka podgląd"
+  },
+  "lockTitle": {
+    "en": "The TV is locked",
+    "de": "Der Fernseher ist gesperrt",
+    "es": "El televisor está bloqueado",
+    "zh": "电视已锁定",
+    "pt": "A televisão está bloqueada",
+    "it": "La TV è bloccata",
+    "pl": "Telewizor jest zablokowany"
+  },
+  "lockHint": {
+    "en": "Enter the parent PIN with the remote or ask for permission",
+    "de": "Eltern-PIN mit der Fernbedienung eingeben oder um Erlaubnis bitten",
+    "es": "Introduce el PIN de los padres con el mando o pide permiso",
+    "zh": "用遥控器输入家长 PIN，或请求许可",
+    "pt": "Introduz o PIN dos pais com o comando ou pede autorização",
+    "it": "Inserisci il PIN dei genitori con il telecomando o chiedi il permesso",
+    "pl": "Wpisz PIN rodzica pilotem albo poproś o zgodę"
+  },
+  "lockRequest": {
+    "en": "Ask for permission",
+    "de": "Um Erlaubnis bitten",
+    "es": "Pedir permiso",
+    "zh": "请求许可",
+    "pt": "Pedir autorização",
+    "it": "Chiedi il permesso",
+    "pl": "Poproś o zgodę"
+  },
+  "lockRequestSent": {
+    "en": "Request sent, wait for the answer",
+    "de": "Anfrage gesendet, bitte warten",
+    "es": "Solicitud enviada, espera la respuesta",
+    "zh": "请求已发送，请等待回复",
+    "pt": "Pedido enviado, aguarda a resposta",
+    "it": "Richiesta inviata, attendi la risposta",
+    "pl": "Prośba wysłana, czekaj na odpowiedź"
+  },
+  "lockWrongPin": {
+    "en": "Wrong PIN",
+    "de": "Falscher PIN",
+    "es": "PIN incorrecto",
+    "zh": "PIN 错误",
+    "pt": "PIN errado",
+    "it": "PIN errato",
+    "pl": "Zły PIN"
+  },
+  "lockWait": {
+    "en": "Try again in {seconds} s",
+    "de": "Erneut versuchen in {seconds} s",
+    "es": "Inténtalo de nuevo en {seconds} s",
+    "zh": "{seconds} 秒后重试",
+    "pt": "Tenta novamente dentro de {seconds} s",
+    "it": "Riprova tra {seconds} s",
+    "pl": "Spróbuj za {seconds} s"
+  },
+  "lockDenied": {
+    "en": "The parents said no",
+    "de": "Die Eltern haben abgelehnt",
+    "es": "Los padres han dicho que no",
+    "zh": "家长拒绝了",
+    "pt": "Os pais recusaram",
+    "it": "I genitori hanno rifiutato",
+    "pl": "Rodzice odmówili"
+  },
+  "lockOffline": {
+    "en": "No connection to Home Assistant",
+    "de": "Keine Verbindung zu Home Assistant",
+    "es": "Sin conexión con Home Assistant",
+    "zh": "无法连接到 Home Assistant",
+    "pt": "Sem ligação ao Home Assistant",
+    "it": "Nessuna connessione a Home Assistant",
+    "pl": "Brak połączenia z Home Assistant"
   }
 }

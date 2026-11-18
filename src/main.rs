@@ -388,6 +388,8 @@ fn effects(
                 state.dirty = true;
             }
             Effect::Watch(id) => bridge.watch(id),
+            Effect::LockUnlock(pin) => bridge.lock_unlock(pin),
+            Effect::LockRequest => bridge.lock_request(),
         }
     }
     true
@@ -1113,7 +1115,10 @@ fn run() -> Result<(), String> {
                         Keycode::F5 if !repeat => pending.push(Effect::Reload),
                         key if !repeat && digit_of(key).is_some() => {
                             let digit = digit_of(key).unwrap();
-                            if matches!(state.overlay, Some(Overlay::Shortcut { .. })) {
+                            if matches!(state.overlay, Some(Overlay::Lock)) {
+                                press = None;
+                                pending = state.lock_digit(digit);
+                            } else if matches!(state.overlay, Some(Overlay::Shortcut { .. })) {
                                 press = None;
                                 shortcut.up(digit);
                                 pending = state.activate_shortcut_digit(digit);

@@ -1346,3 +1346,191 @@ fn keyboard_done_saves_a_typed_input_name() {
     assert_eq!(state.preferences.input_names["com.webos.app.hdmi1"], "PS5");
     assert!(state.overlay.is_none());
 }
+
+fn locked_state() -> State {
+    let mut state = ready();
+    state.apply_bridge(crate::bridge::Update::Lock(crate::bridge::LockState {
+        locked: true,
+        reason: "Czas bez telewizora do 19:00".into(),
+        ..Default::default()
+    }));
+    state
+}
+
+#[test]
+fn lock_update_opens_overlay_and_unlock_closes_it() {
+    let mut state = locked_state();
+    assert!(state.locked());
+    assert_eq!(state.focus, Target::LockPin);
+    state.apply_bridge(crate::bridge::Update::Lock(
+        crate::bridge::LockState::default(),
+    ));
+    assert!(!state.locked());
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn lock_digits_append_up_to_eight_and_ok_submits() {
+    let mut state = locked_state();
+    for digit in [1, 2, 3, 4] {
+        state.lock_digit(digit);
+    }
+    assert_eq!(state.activate(), vec![Effect::LockUnlock("1234".into())]);
+    assert!(state.lock_pin.is_empty());
+    for digit in 0..10 {
+        state.lock_digit(digit);
+    }
+    assert_eq!(state.lock_pin.len(), 8);
+    assert_eq!(state.lock_pin, "01234567");
+}
+
+#[test]
+fn lock_back_deletes_last_digit_and_never_closes() {
+    let mut state = locked_state();
+    state.lock_digit(4);
+    state.lock_digit(2);
+    state.back();
+    assert_eq!(state.lock_pin, "4");
+    for _ in 0..3 {
+        state.back();
+    }
+    assert!(state.lock_pin.is_empty());
+    assert!(state.locked());
+}
+
+#[test]
+fn lock_arrows_move_between_pin_and_request() {
+    let mut state = locked_state();
+    state.direction(Direction::Down, &controls(&state));
+    assert_eq!(state.focus, Target::LockRequest);
+    assert_eq!(state.activate(), vec![Effect::LockRequest]);
+    state.direction(Direction::Up, &controls(&state));
+    assert_eq!(state.focus, Target::LockPin);
+    state.direction(Direction::Left, &controls(&state));
+    assert_eq!(state.focus, Target::LockPin);
+}
+
+#[test]
+fn lock_blocks_shortcut_and_recents_hold() {
+    let mut state = locked_state();
+    assert!(state.hold().is_empty());
+    assert!(state.open_recents().is_empty());
+    assert!(state.locked());
+    assert!(state.activate_shortcut_digit(1).is_empty());
+    assert!(state.launch_shortcut(1).is_empty());
+}
+
+#[test]
+fn lock_overrides_camera_overlay() {
+    let mut state = locked_state();
+    state.apply_bridge(crate::bridge::Update::Ring {
+        id: 1,
+        camera: "camera.furtka".into(),
+        title: "Ktoś dzwoni".into(),
+    });
+    assert!(matches!(state.overlay, Some(Overlay::Lock)));
+}
+
+#[test]
+fn lock_result_wrong_pin_sets_status_and_clears_pin() {
+    let mut state = locked_state();
+    state.lock_digit(1);
+    state.apply_bridge(crate::bridge::Update::LockResult {
+        request: false,
+        ok: false,
+        retry_after: 0,
+        error: String::new(),
+    });
+    assert_eq!(
+        state.lock_status,
+        state.preferences.language.t("lockWrongPin")
+    );
+    assert!(state.lock_pin.is_empty());
+}
+
+#[test]
+fn lock_result_with_retry_after_shows_seconds() {
+    let mut state = locked_state();
+    state.apply_bridge(crate::bridge::Update::LockResult {
+        request: false,
+        ok: false,
+        retry_after: 42,
+        error: String::new(),
+    });
+    assert!(state.lock_status.contains("42"));
+}
+
+#[test]
+fn lock_line_prefers_status_then_denied_then_pending() {
+    let mut state = locked_state();
+    assert!(state.lock_line().is_empty());
+    state.lock.pending = true;
+    assert_eq!(
+        state.lock_line(),
+        state.preferences.language.t("lockRequestSent")
+    );
+    state.lock.denied = true;
+    assert_eq!(
+        state.lock_line(),
+        state.preferences.language.t("lockDenied")
+    );
+    state.lock_status = "Zły PIN".into();
+    assert_eq!(state.lock_line(), "Zły PIN");
+}
+
+#[test]
+fn lock_screen_scene_has_pin_and_request_controls() {
+    let state = locked_state();
+    let targets: Vec<_> = controls(&state)
+        .into_iter()
+        .map(|control| control.target)
+        .collect();
+    assert_eq!(targets, vec![Target::LockPin, Target::LockRequest]);
+}
+
+#[test]
+fn lock_messages_exist_in_polish_and_english() {
+    use crate::i18n::Language;
+    for key in [
+        "lockTitle",
+        "lockHint",
+        "lockRequest",
+        "lockRequestSent",
+        "lockWrongPin",
+        "lockWait",
+        "lockDenied",
+        "lockOffline",
+    ] {
+        assert_ne!(Language::Pl.t(key), key);
+        assert_ne!(Language::En.t(key), key);
+    }
+    assert_eq!(Language::Pl.t("lockTitle"), "Telewizor jest zablokowany");
+    assert_eq!(Language::Pl.t("lockWrongPin"), "Zły PIN");
+    assert_eq!(
+        Language::Pl.format("lockWait", &[("seconds", "42")]),
+        "Spróbuj za 42 s"
+    );
+}
+
+#[test]
+fn lock_screen_shows_reason_from_ha() {
+    let state = locked_state();
+    let scene = scene(&state);
+    assert!(scene.draw.iter().any(|draw| matches!(
+        draw,
+        crate::renderer::Draw::Text(value, ..) if value == "Czas bez telewizora do 19:00"
+    )));
+}
+
+#[test]
+fn lock_pin_is_drawn_as_dots_never_digits() {
+    let mut state = locked_state();
+    for digit in [4, 2, 7] {
+        state.lock_digit(digit);
+    }
+    let scene = scene(&state);
+    assert!(!scene.draw.iter().any(|draw| matches!(
+        draw,
+        crate::renderer::Draw::Text(value, ..) if matches!(value.as_str(), "427" | "4" | "2" | "7")
+    )));
+}

@@ -76,6 +76,8 @@ pub enum Target {
     HaPair,
     HaPairCancel,
     HaToggle,
+    LockPin,
+    LockRequest,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -115,6 +117,7 @@ pub enum Overlay {
     Keyboard,
     SystemKeyboard,
     Camera { id: String },
+    Lock,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -167,6 +170,8 @@ pub enum Effect {
     StartPairing,
     StopPairing,
     Watch(Option<String>),
+    LockUnlock(String),
+    LockRequest,
 }
 
 pub const KEYS: [&str; 40] = [
@@ -215,7 +220,12 @@ pub struct State {
     pub pairing: Option<crate::pair::Offer>,
     pub input_name: String,
     pub recents: crate::recents::Recents,
+    pub lock: crate::bridge::LockState,
+    pub lock_pin: String,
+    pub lock_status: String,
 }
+
+pub const LOCK_PIN_MAX: usize = 8;
 
 fn nearest_row(controls: &[Control], x: f32, tiles: bool) -> Option<Target> {
     let matches_kind = |target: &Target| {
@@ -284,7 +294,55 @@ impl State {
             pairing: None,
             input_name: String::new(),
             recents: crate::recents::Recents::default(),
+            lock: crate::bridge::LockState::default(),
+            lock_pin: String::new(),
+            lock_status: String::new(),
         }
+    }
+
+    pub fn locked(&self) -> bool {
+        matches!(self.overlay, Some(Overlay::Lock))
+    }
+
+    /// A digit from the remote typed on the lock screen.
+    pub fn lock_digit(&mut self, digit: u8) -> Vec<Effect> {
+        if !self.locked() {
+            return vec![];
+        }
+        if self.lock_pin.len() < LOCK_PIN_MAX {
+            self.lock_pin.push(char::from(b'0' + digit.min(9)));
+        }
+        self.lock_status.clear();
+        self.focus = Target::LockPin;
+        self.dirty = true;
+        vec![]
+    }
+
+    fn lock_activate(&mut self) -> Vec<Effect> {
+        self.dirty = true;
+        if self.focus == Target::LockRequest {
+            self.lock_status.clear();
+            return vec![Effect::LockRequest];
+        }
+        if self.lock_pin.is_empty() {
+            return vec![];
+        }
+        vec![Effect::LockUnlock(std::mem::take(&mut self.lock_pin))]
+    }
+
+    /// The line under the buttons: our own feedback first, then what Home Assistant says.
+    pub fn lock_line(&self) -> String {
+        let language = self.preferences.language;
+        if !self.lock_status.is_empty() {
+            return self.lock_status.clone();
+        }
+        if self.lock.denied {
+            return language.t("lockDenied").to_owned();
+        }
+        if self.lock.pending {
+            return language.t("lockRequestSent").to_owned();
+        }
+        String::new()
     }
 
     pub fn notify(&mut self, text: impl Into<String>) {
@@ -708,6 +766,14 @@ impl State {
     pub fn direction(&mut self, direction: Direction, controls: &[Control]) -> Vec<Effect> {
         self.pointer = false;
         self.dirty = true;
+        if self.locked() {
+            self.focus = match (direction, &self.focus) {
+                (Direction::Down, Target::LockPin) => Target::LockRequest,
+                (Direction::Up, Target::LockRequest) => Target::LockPin,
+                _ => self.focus.clone(),
+            };
+            return vec![];
+        }
         if self.recents_open() {
             return self.recent_direction(direction);
         }
@@ -1210,6 +1276,9 @@ impl State {
     }
 
     pub fn hold(&mut self) -> Vec<Effect> {
+        if self.locked() {
+            return vec![];
+        }
         if self.overlay.is_some() {
             return vec![];
         }
@@ -1299,6 +1368,9 @@ impl State {
     }
 
     pub fn launch_shortcut(&mut self, digit: u8) -> Vec<Effect> {
+        if self.locked() {
+            return vec![];
+        }
         if self.text_input_active() || self.overlay.is_some() || self.moving.is_some() {
             return vec![];
         }
@@ -1313,6 +1385,9 @@ impl State {
     }
 
     pub fn activate_shortcut_digit(&mut self, digit: u8) -> Vec<Effect> {
+        if self.locked() {
+            return vec![];
+        }
         let Some(Overlay::Shortcut { id, restore }) = self.overlay.clone() else {
             return vec![];
         };
@@ -1518,6 +1593,62 @@ impl State {
                     self.dirty = true;
                 }
             }
+            crate::bridge::Update::Lock(lock) => {
+                if lock.locked {
+                    if !self.locked() {
+                        self.overlay = Some(Overlay::Lock);
+                        self.moving = None;
+                        self.pressed = None;
+                        self.lock_pin.clear();
+                        self.lock_status.clear();
+                    }
+                    if !matches!(self.focus, Target::LockPin | Target::LockRequest) {
+                        self.focus = Target::LockPin;
+                    }
+                } else if self.locked() {
+                    self.overlay = None;
+                    self.lock_pin.clear();
+                    self.lock_status.clear();
+                    self.focus = Target::Nav(0);
+                }
+                if !lock.notice.is_empty() && lock.notice != self.lock.notice {
+                    self.notify(lock.notice.clone());
+                }
+                if self.lock != lock {
+                    self.lock = lock;
+                }
+                self.dirty = true;
+            }
+            crate::bridge::Update::LockResult {
+                request,
+                ok,
+                retry_after,
+                error,
+            } => {
+                if !self.locked() {
+                    return;
+                }
+                let language = self.preferences.language;
+                self.lock_status = if !error.is_empty() {
+                    error
+                } else if ok {
+                    if request {
+                        language.t("lockRequestSent").to_owned()
+                    } else {
+                        String::new()
+                    }
+                } else if retry_after > 0 {
+                    language.format("lockWait", &[("seconds", &retry_after.to_string())])
+                } else if request {
+                    language.t("lockOffline").to_owned()
+                } else {
+                    language.t("lockWrongPin").to_owned()
+                };
+                if !request {
+                    self.lock_pin.clear();
+                }
+                self.dirty = true;
+            }
             crate::bridge::Update::Failed(error) => {
                 if self.bridge_error.as_deref() != Some(error.as_str()) {
                     self.bridge_error = Some(error);
@@ -1542,6 +1673,9 @@ impl State {
             crate::bridge::Update::Ring { id, camera, title } => {
                 if id > self.ring_id && !camera.is_empty() {
                     self.ring_id = id;
+                    if self.locked() {
+                        return;
+                    }
                     self.moving = None;
                     self.overlay = Some(Overlay::Camera { id: camera.clone() });
                     self.pending_watch = Some(camera);
@@ -1706,6 +1840,9 @@ impl State {
     }
 
     pub fn activate(&mut self) -> Vec<Effect> {
+        if self.locked() {
+            return self.lock_activate();
+        }
         if self.recents_open() {
             use crate::recents::Command;
             return match self.focus.clone() {
@@ -2081,6 +2218,11 @@ impl State {
     pub fn back(&mut self) -> Vec<Effect> {
         self.pointer = false;
         self.dirty = true;
+        if self.locked() {
+            self.lock_pin.pop();
+            self.lock_status.clear();
+            return vec![];
+        }
         if self.moving.take().is_some() {
             return vec![];
         }

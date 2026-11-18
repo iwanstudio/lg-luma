@@ -376,7 +376,8 @@ pub fn scene_with_pill(
         overlay @ (Overlay::Options { .. }
         | Overlay::Shortcut { .. }
         | Overlay::Keyboard
-        | Overlay::Camera { .. }),
+        | Overlay::Camera { .. }
+        | Overlay::Lock),
     ) = &state.overlay
     {
         out.controls.clear();
@@ -387,6 +388,7 @@ pub fn scene_with_pill(
             Overlay::Shortcut { id, .. } => shortcut_picker(&mut out, state, assets, id),
             Overlay::Keyboard => keyboard(&mut out, state, assets),
             Overlay::Camera { id } => camera_preview(&mut out, state, id),
+            Overlay::Lock => lock_screen(&mut out, state),
             Overlay::SystemKeyboard | Overlay::Recents { .. } => {}
         }
         if let Some(opened) = state.panel_started {
@@ -896,6 +898,83 @@ fn camera_cards(out: &mut Scene, state: &State, tiles: &[crate::bridge::Tile], y
         out.control(Target::HaTile(tile.entity_id.clone()), rect, true);
     }
     tiles.len().div_ceil(3) as f32 * 380.
+}
+
+/// Full-screen parental lock: the reason, eight PIN dots and a button that asks the parents.
+fn lock_screen(out: &mut Scene, state: &State) {
+    let language = state.preferences.language;
+    out.shape(Rect::new(0., 0., 1920., 1080.), 0., c(0x080b12, 1.));
+    let panel = Rect::new(460., 190., 1000., 700.);
+    out.shape(panel, 28., c(0x101318, 1.));
+    out.border(panel, 28., 1., c(0xffffff, 0.12));
+    out.text(
+        language.t("lockTitle"),
+        Rect::new(500., 240., 920., 64.),
+        text(48., 600, -0.03),
+        WHITE,
+        true,
+    );
+    let reason = if state.lock.reason.is_empty() {
+        language.t("lockHint").to_owned()
+    } else {
+        state.lock.reason.clone()
+    };
+    out.text(
+        reason,
+        Rect::new(500., 330., 920., 40.),
+        text(28., 500, 0.),
+        c(0xf3f3f3, 0.9),
+        true,
+    );
+    out.text(
+        language.t("lockHint"),
+        Rect::new(500., 390., 920., 32.),
+        text(20., 400, 0.),
+        c(0xf3f3f3, 0.6),
+        true,
+    );
+    let field = Rect::new(660., 480., 600., 96.);
+    let field_focus = state.focus == Target::LockPin;
+    out.shape(field, 20., c(0x171c20, 1.));
+    out.border(
+        field,
+        20.,
+        if field_focus { 3. } else { 1. },
+        if field_focus {
+            c(0xffffff, 0.95)
+        } else {
+            c(0xffffff, 0.14)
+        },
+    );
+    let filled = state.lock_pin.len();
+    for index in 0..crate::state::LOCK_PIN_MAX {
+        let x = field.x + 59. + index as f32 * 66.;
+        let color = if index < filled {
+            c(0xffffff, 1.)
+        } else {
+            c(0xffffff, 0.18)
+        };
+        out.shape(Rect::new(x, field.y + 38., 20., 20.), 10., color);
+    }
+    out.control(Target::LockPin, field, false);
+    let button = Rect::new(710., 630., 500., 84.);
+    let button_focus = state.focus == Target::LockRequest;
+    out.pill(button, button_focus, false);
+    out.text(
+        language.t("lockRequest"),
+        Rect::new(button.x, button.y + 26., button.w, 34.),
+        text(26., 550, -0.01),
+        if button_focus { c(0x101318, 1.) } else { WHITE },
+        true,
+    );
+    out.control(Target::LockRequest, button, false);
+    out.text(
+        state.lock_line(),
+        Rect::new(500., 760., 920., 40.),
+        text(24., 500, 0.),
+        c(0xffd27a, 1.),
+        true,
+    );
 }
 
 fn camera_preview(out: &mut Scene, state: &State, id: &str) {
