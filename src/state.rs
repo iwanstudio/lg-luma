@@ -1509,10 +1509,10 @@ impl State {
                     }
                 }
                 if self.tiles != tiles {
-                    if let Target::HaTile(id) = &self.focus {
-                        if !tiles.iter().any(|tile| &tile.entity_id == id) {
-                            self.focus = Target::Nav(0);
-                        }
+                    if let Target::HaTile(id) = &self.focus
+                        && !tiles.iter().any(|tile| &tile.entity_id == id)
+                    {
+                        self.focus = Target::Nav(0);
                     }
                     self.tiles = tiles;
                     self.dirty = true;
@@ -1971,21 +1971,21 @@ impl State {
                 if let Some(Overlay::Shortcut { id, restore }) = self.overlay.clone() {
                     return self.finish_shortcut(index, id, restore);
                 }
-                if index == 2 {
-                    if let Some(Overlay::Options { id, restore }) = self.overlay.clone() {
-                        let focus = self
-                            .preferences
-                            .digit_for_app(&id)
-                            .map(|digit| if digit == 0 { 9 } else { digit as usize - 1 })
-                            .unwrap_or(0);
-                        self.overlay = Some(Overlay::Shortcut { id, restore });
-                        self.focus = Target::Option(focus);
-                        self.dirty = true;
-                        if !self.preferences.reduced_motion {
-                            self.panel_started = Some(Instant::now());
-                        }
-                        return vec![];
+                if index == 2
+                    && let Some(Overlay::Options { id, restore }) = self.overlay.clone()
+                {
+                    let focus = self
+                        .preferences
+                        .digit_for_app(&id)
+                        .map(|digit| if digit == 0 { 9 } else { digit as usize - 1 })
+                        .unwrap_or(0);
+                    self.overlay = Some(Overlay::Shortcut { id, restore });
+                    self.focus = Target::Option(focus);
+                    self.dirty = true;
+                    if !self.preferences.reduced_motion {
+                        self.panel_started = Some(Instant::now());
                     }
+                    return vec![];
                 }
                 let Some(Overlay::Options { id, restore }) = self.overlay.take() else {
                     return vec![];
