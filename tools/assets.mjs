@@ -21,14 +21,8 @@ const font = path.join(out, 'font.woff2');
 await fs.copyFile(path.join(source, 'fonts/inter-latin.woff2'), font);
 const decoded = spawnSync('woff2_decompress', [font], { encoding: 'utf8' });
 if (decoded.error || decoded.status !== 0) {
-  const python = spawnSync(
-    'python3',
-    [
-      '-c',
-      'from fontTools.ttLib import TTFont; font=TTFont("'+font+'"); font.flavor=None; font.save("'+path.join(out, 'font.ttf')+'")',
-    ],
-    { encoding: 'utf8' },
-  );
+  const script = `from fontTools.ttLib import TTFont; font=TTFont("${font}"); font.flavor=None; font.save("${path.join(out, 'font.ttf')}")`;
+  const python = spawnSync('python3', ['-c', script], { encoding: 'utf8' });
   if (python.error || python.status !== 0) {
     throw new Error('Font conversion needs woff2_decompress or fontTools.', {
       cause: python.error ?? decoded.error ?? new Error(python.stderr || decoded.stderr),
