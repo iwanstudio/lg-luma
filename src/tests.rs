@@ -1567,3 +1567,42 @@ fn lock_status_expires_on_tick() {
     state.tick();
     assert!(state.lock_status.is_empty());
 }
+
+fn locked_with_pin_length(length: usize) -> State {
+    let mut state = ready();
+    state.apply_bridge(crate::bridge::Update::Lock(crate::bridge::LockState {
+        locked: true,
+        pin_length: length,
+        ..Default::default()
+    }));
+    state
+}
+
+#[test]
+fn lock_digits_stop_at_the_pin_length() {
+    let mut state = locked_with_pin_length(4);
+    for digit in [0, 1, 2, 3, 4, 5] {
+        state.lock_digit(digit);
+    }
+    assert_eq!(state.lock_pin, "0123");
+}
+
+#[test]
+fn lock_screen_draws_one_dot_per_pin_digit() {
+    let dots = |state: &State| {
+        scene(state)
+            .draw
+            .iter()
+            .filter(|draw| {
+                matches!(
+                    draw,
+                    crate::renderer::Draw::Shape(rect, radius, width, _)
+                        if rect.w == 20. && rect.h == 20. && *radius == 10. && *width == 0.
+                )
+            })
+            .count()
+    };
+    assert_eq!(dots(&locked_with_pin_length(4)), 4);
+    assert_eq!(dots(&locked_with_pin_length(6)), 6);
+    assert_eq!(dots(&locked_with_pin_length(0)), 8);
+}

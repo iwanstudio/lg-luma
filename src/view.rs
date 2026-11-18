@@ -947,8 +947,14 @@ fn lock_screen(out: &mut Scene, state: &State) {
         },
     );
     let filled = state.lock_pin.len();
-    for index in 0..crate::state::LOCK_PIN_MAX {
-        let x = field.x + 59. + index as f32 * 66.;
+    let count = if state.lock.pin_length > 0 {
+        state.lock.pin_length
+    } else {
+        crate::state::LOCK_PIN_MAX
+    };
+    let start = field.x + (field.w - ((count - 1) as f32 * 66. + 20.)) / 2.;
+    for index in 0..count {
+        let x = start + index as f32 * 66.;
         let color = if index < filled {
             c(0xffffff, 1.)
         } else {

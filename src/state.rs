@@ -311,7 +311,12 @@ impl State {
         if !self.locked() {
             return vec![];
         }
-        if self.lock_pin.len() < LOCK_PIN_MAX {
+        let limit = if self.lock.pin_length > 0 {
+            self.lock.pin_length
+        } else {
+            LOCK_PIN_MAX
+        };
+        if self.lock_pin.len() < limit {
             self.lock_pin.push(char::from(b'0' + digit.min(9)));
         }
         self.lock_status.clear();

@@ -1,0 +1,77 @@
+name: Fast IPK build
+
+# A quick test build for the fork: no apt packages, no tests, no desktop rendering.
+# The full CI in ci.yml stays the gate before anything is merged or released.
+on:
+  workflow_dispatch:
+  push:
+    branches: [luma-ha]
+    paths:
+      - 'src/**'
+      - 'assets/**'
+      - 'tools/**'
+      - 'tv/**'
+      - 'vector-geometry/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'appinfo.json'
+      - 'package.json'
+      - '.github/workflows/fast-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Cross-build the IPK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Test builds skip link-time optimisation. Release builds in ci.yml keep it.
+      CARGO_PROFILE_RELEASE_LTO: 'off'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          targets: armv7-unknown-linux-gnueabi
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: fast-${{ hashFiles('tools/build-webos.sh', 'tools/setup-webos-sdk.mjs', 'tools/webos-runtime.mjs') }}
+      - name: Cache the webOS SDK
+        uses: actions/cache@v4
+        with:
+          path: .build/toolchain
+          key: webos-sdk-${{ hashFiles('tools/setup-webos-sdk.mjs') }}
+      - name: Install font tools only
+        run: sudo apt-get install -y --no-install-recommends python3-fonttools woff2
+      - name: Generate native assets
+        run: pnpm assets
+      - name: Set up the webOS SDK
+        run: pnpm sdk
+      - name: Cross-build and package the IPK
+        run: |
+          export WEBOS_NDK="$GITHUB_WORKSPACE/.build/toolchain/arm-webos-linux-gnueabi_sdk-buildroot"
+          pnpm build
+          node tools/package.mjs
+      - name: Upload the IPK
+        uses: actions/upload-artifact@v7
+        with:
+          name: luma-ipk
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/*.ipk
+            dist/sha256sums

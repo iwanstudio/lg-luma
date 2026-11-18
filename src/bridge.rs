@@ -67,6 +67,8 @@ pub struct LockState {
     pub denied: bool,
     pub blocked_apps: Vec<String>,
     pub notice: String,
+    /// Digits in the parent PIN, 0 when Home Assistant does not say.
+    pub pin_length: usize,
 }
 
 #[derive(Debug)]
@@ -536,6 +538,11 @@ fn parse_lock(value: &serde_json::Value) -> Option<LockState> {
         denied: flag("denied"),
         blocked_apps,
         notice: text("notice"),
+        pin_length: object
+            .get("pin_length")
+            .and_then(|item| item.as_u64())
+            .unwrap_or(0)
+            .min(PIN_MAX as u64) as usize,
     })
 }
 
@@ -793,5 +800,18 @@ mod tests {
         assert!(!valid_pin("123456789"));
         assert!(!valid_pin("12a4"));
         assert!(!valid_pin(" 1234"));
+    }
+
+    #[test]
+    fn parse_lock_reads_and_clamps_pin_length() {
+        assert_eq!(
+            parse_lock(&json!({ "pin_length": 4 })).unwrap().pin_length,
+            4
+        );
+        assert_eq!(
+            parse_lock(&json!({ "pin_length": 99 })).unwrap().pin_length,
+            8
+        );
+        assert_eq!(parse_lock(&json!({})).unwrap().pin_length, 0);
     }
 }
