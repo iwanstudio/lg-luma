@@ -1924,5 +1924,68 @@
     "pt": "Hora de brincar! Brinquem juntos ou com os vossos brinquedos.",
     "it": "È ora di giocare! Giocate insieme o con i vostri giocattoli.",
     "pl": "Czas na zabawę! Pobawcie się razem albo zabawkami."
+  },
+  "lockPlay2": {
+    "en": "Build something out of blocks that nobody has built before.",
+    "de": "Baut aus Bausteinen etwas, das es noch nie gab.",
+    "es": "Construid con bloques algo que nadie haya construido antes.",
+    "zh": "用积木搭一个从来没有过的东西。",
+    "pt": "Construam com blocos algo que ninguém construiu antes.",
+    "it": "Costruite con i mattoncini qualcosa che nessuno ha mai costruito.",
+    "pl": "Zbudujcie z klocków coś, czego jeszcze nie było."
+  },
+  "lockPlay3": {
+    "en": "Draw your own comic together.",
+    "de": "Zeichnet gemeinsam euren eigenen Comic.",
+    "es": "Dibujad juntos vuestro propio cómic.",
+    "zh": "一起画一本自己的漫画吧。",
+    "pt": "Desenhem juntos a vossa própria banda desenhada.",
+    "it": "Disegnate insieme il vostro fumetto.",
+    "pl": "Narysujcie wspólnie swój własny komiks."
+  },
+  "lockPlay4": {
+    "en": "Invent a new game and give it a name.",
+    "de": "Erfindet ein neues Spiel und gebt ihm einen Namen.",
+    "es": "Inventad un juego nuevo y ponedle nombre.",
+    "zh": "发明一个新游戏，并给它起个名字。",
+    "pt": "Inventem um jogo novo e deem-lhe um nome.",
+    "it": "Inventate un gioco nuovo e dategli un nome.",
+    "pl": "Wymyślcie nową zabawę i nadajcie jej nazwę."
+  },
+  "lockPlay5": {
+    "en": "Build a hideout from pillows and blankets.",
+    "de": "Baut aus Kissen und Decken ein Versteck.",
+    "es": "Construid un escondite con cojines y mantas.",
+    "zh": "用枕头和毯子搭一个秘密基地。",
+    "pt": "Construam um esconderijo com almofadas e cobertores.",
+    "it": "Costruite un nascondiglio con cuscini e coperte.",
+    "pl": "Zbudujcie bazę z poduszek i koców."
+  },
+  "lockPlay6": {
+    "en": "Take turns reading to each other.",
+    "de": "Lest euch abwechselnd etwas vor.",
+    "es": "Leeos en voz alta por turnos.",
+    "zh": "轮流给对方读一段故事。",
+    "pt": "Leiam em voz alta à vez.",
+    "it": "Leggetevi a turno qualcosa a voce alta.",
+    "pl": "Poczytajcie sobie nawzajem po kolei."
+  },
+  "lockPlay7": {
+    "en": "Make an obstacle course in your room.",
+    "de": "Baut in eurem Zimmer einen Hindernisparcours.",
+    "es": "Montad una carrera de obstáculos en vuestra habitación.",
+    "zh": "在房间里布置一条障碍赛道。",
+    "pt": "Montem um percurso de obstáculos no quarto.",
+    "it": "Create un percorso a ostacoli in camera.",
+    "pl": "Zróbcie w pokoju tor przeszkód."
+  },
+  "lockPlay8": {
+    "en": "Tell a story where you are the heroes.",
+    "de": "Erzählt euch eine Geschichte, in der ihr die Helden seid.",
+    "es": "Contaos una historia en la que vosotros seáis los héroes.",
+    "zh": "编一个故事，让你们做故事里的英雄。",
+    "pt": "Contem uma história em que vocês são os heróis.",
+    "it": "Raccontatevi una storia in cui siete voi gli eroi.",
+    "pl": "Opowiedzcie sobie historię, w której jesteście bohaterami."
   }
 }

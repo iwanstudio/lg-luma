@@ -1607,15 +1607,49 @@ fn lock_screen_draws_one_dot_per_pin_digit() {
     assert_eq!(dots(&locked_with_pin_length(0)), 8);
 }
 
+fn lock_play_key(index: usize) -> String {
+    if index == 0 {
+        "lockPlay".to_owned()
+    } else {
+        format!("lockPlay{}", index + 1)
+    }
+}
+
 #[test]
 fn lock_screen_invites_the_children_to_play() {
     let state = locked_state();
-    let message = state.preferences.language.t("lockPlay").to_owned();
-    assert_ne!(message, "lockPlay");
+    let language = state.preferences.language;
+    let messages: Vec<String> = (0..crate::state::LOCK_PLAY_COUNT)
+        .map(|index| language.t(&lock_play_key(index)).to_owned())
+        .collect();
     assert!(scene(&state).draw.iter().any(|draw| matches!(
         draw,
-        crate::renderer::Draw::Text(value, ..) if *value == message
+        crate::renderer::Draw::Text(value, ..) if messages.contains(value)
     )));
+}
+
+#[test]
+fn lock_play_messages_exist_in_polish_and_english() {
+    use crate::i18n::Language;
+    for index in 0..crate::state::LOCK_PLAY_COUNT {
+        let key = lock_play_key(index);
+        assert_ne!(Language::Pl.t(&key), key);
+        assert_ne!(Language::En.t(&key), key);
+    }
+}
+
+#[test]
+fn lock_play_message_rotates_and_fades() {
+    use crate::view::lock_play_line;
+    assert_eq!(lock_play_line(3, 0., true), (3, 1.));
+    assert_eq!(lock_play_line(3, 99., true), (3, 1.));
+    assert_eq!(lock_play_line(0, 7., false), (0, 1.));
+    let (index, fade) = lock_play_line(0, 14.4, false);
+    assert_eq!(index, 1);
+    assert!((fade - 0.5).abs() < 0.01);
+    assert_eq!(lock_play_line(7, 14.8, false).0, 0);
+    assert!(lock_play_line(0, 0., false).1 < 0.01);
+    assert!(lock_play_line(0, 13.9, false).1 < 0.2);
 }
 
 #[test]

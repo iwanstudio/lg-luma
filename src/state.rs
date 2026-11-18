@@ -225,9 +225,12 @@ pub struct State {
     pub lock_status: String,
     pub lock_status_at: Option<Instant>,
     pub lock_since: Option<Instant>,
+    /// Which play message the lock screen starts with. Picked at random each time it opens.
+    pub lock_play_offset: usize,
 }
 
 pub const LOCK_PIN_MAX: usize = 8;
+pub const LOCK_PLAY_COUNT: usize = 8;
 
 fn nearest_row(controls: &[Control], x: f32, tiles: bool) -> Option<Target> {
     let matches_kind = |target: &Target| {
@@ -301,6 +304,7 @@ impl State {
             lock_status: String::new(),
             lock_status_at: None,
             lock_since: None,
+            lock_play_offset: 0,
         }
     }
 
@@ -1619,6 +1623,10 @@ impl State {
                     if !self.locked() {
                         self.overlay = Some(Overlay::Lock);
                         self.lock_since = Some(Instant::now());
+                        self.lock_play_offset = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |elapsed| elapsed.subsec_nanos() as usize)
+                            % LOCK_PLAY_COUNT;
                         self.moving = None;
                         self.pressed = None;
                         self.lock_pin.clear();

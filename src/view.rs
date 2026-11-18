@@ -900,6 +900,21 @@ fn camera_cards(out: &mut Scene, state: &State, tiles: &[crate::bridge::Tile], y
     tiles.len().div_ceil(3) as f32 * 380.
 }
 
+/// Which play message to show and how visible it is. The message changes every 14 seconds,
+/// fading out and in. With reduced motion the first message stays put.
+pub fn lock_play_line(offset: usize, seconds: f32, reduced_motion: bool) -> (usize, f32) {
+    const PERIOD: f32 = 14.;
+    const FADE: f32 = 0.8;
+    let count = crate::state::LOCK_PLAY_COUNT;
+    if reduced_motion {
+        return (offset % count, 1.);
+    }
+    let step = (seconds / PERIOD) as usize;
+    let phase = seconds % PERIOD;
+    let fade = (phase / FADE).min((PERIOD - phase) / FADE).clamp(0., 1.);
+    ((offset + step) % count, fade)
+}
+
 /// Soft bubbles drift up behind the lock panel and a row of toy blocks hops below it,
 /// a nudge to go and play instead of watching TV.
 fn lock_play(out: &mut Scene, seconds: f32) {
@@ -1014,11 +1029,21 @@ fn lock_screen(out: &mut Scene, state: &State) {
         true,
     );
     out.control(Target::LockRequest, button, false);
+    let (play, fade) = lock_play_line(
+        state.lock_play_offset,
+        seconds,
+        state.preferences.reduced_motion,
+    );
+    let play_key = if play == 0 {
+        "lockPlay".to_owned()
+    } else {
+        format!("lockPlay{}", play + 1)
+    };
     out.text(
-        language.t("lockPlay"),
+        language.t(&play_key),
         Rect::new(500., 815., 920., 36.),
         text(24., 500, 0.),
-        c(0x9fe3a5, 0.95),
+        c(0x9fe3a5, 0.95 * fade),
         true,
     );
     out.text(
