@@ -11,6 +11,7 @@
 **Spec:** `lg-tv/luma/docs/superpowers/specs/2026-11-18-kontrola-rodzicielska-design.md`
 
 **Odstępstwa od spec (decyzje planu, do wiadomości Iwana):**
+
 - Powstają **nowe** skrypty `script.tv_salon_przyznaj_czas` i `script.tv_salon_odrzuc_prosbe`; istniejące skrypty Androidów (używają `remote.*` i `cleantv://`) zostają nietknięte. Akcje powiadomień to `LUMA_GRANT_<min>` / `LUMA_DENY` obsługiwane przez integrację (istniejąca automatyzacja reaguje tylko na prefiks `TV_`).
 - Liczniki trzyma integracja (`Store`), a nie `history_stats`; publikuje je jako stany `sensor.luma_salon_*` (`hass.states.async_set`).
 
@@ -50,10 +51,12 @@
 ### Task 1: Czysta logika blokady `lock.py`
 
 **Files:**
+
 - Create: `custom_components/luma_bridge/lock.py`
 - Create: `tests/test_lock.py` (pytest, zero importów HA; `pytest.ini` z `pythonpath = custom_components/luma_bridge`)
 
 **Interfaces:**
+
 - Produces:
   - `hash_pin(pin: str, salt: bytes) -> str` (hex SHA-256 z PBKDF2, 100k iteracji), `new_salt() -> bytes`, `verify_pin(pin: str, salt: bytes, digest: str) -> bool` (`hmac.compare_digest`; zwraca False dla pustego/nie-cyfr/>8 znaków).
   - `class PinGuard: __init__(self, max_fails: int = 3, lockout: int = 60)`; `check(now: float) -> int` (pozostałe sekundy przerwy, 0 = wolno); `fail(now: float) -> None`; `ok() -> None`.
@@ -72,6 +75,7 @@
 ### Task 2: Warstwa HA: `lockman.py`, widoki, opcje
 
 **Files:**
+
 - Create: `custom_components/luma_bridge/lockman.py`
 - Modify: `custom_components/luma_bridge/__init__.py` (rejestracja widoków przy `register_view` ok. l. 38–45; wywołanie `LockManager` w `async_setup_entry` i sprzątanie w `async_unload_entry`)
 - Modify: `custom_components/luma_bridge/config_flow.py` (menu `init` w l. ~175: dodać `"parental"`; nowy `async_step_parental`)
@@ -79,6 +83,7 @@
 - Test: ręczny (patrz Step 4); logika już pokryta w Task 1.
 
 **Interfaces:**
+
 - Consumes: `lock.evaluate`, `LockInputs`, `LockResult`, `PinGuard`, `UsageCounter`, `verify_pin`, `hash_pin`, `new_salt`, `app_key`.
 - Produces: `class LockManager: __init__(self, hass, entry)`; `async start() -> None`; `async stop() -> None`; `state() -> dict` (kontrakt `GET /lock`); `async unlock(pin: str) -> dict`; `async request() -> dict`; widoki `LumaLockView` (GET `/api/luma_bridge/lock`), `LumaLockUnlockView` (POST `.../lock/unlock`), `LumaLockRequestView` (POST `.../lock/request`).
 - Opcje wpisu (`entry.options`): `parental_media_player` (`media_player.lg_webos_tv`), `parental_notify` (lista usług `notify.*`), `parental_pin_hash` + `parental_pin_salt` (zapis PIN-u: pole `parental_pin` w formularzu jest hashowane i nie zapisywane jawnie), `parental_enabled` (bool).
@@ -111,6 +116,7 @@
 **Files:** brak (zmiany w HA).
 
 **Interfaces:**
+
 - Produces: `script.tv_salon_przyznaj_czas` (pole `minutes`, puste = `input_number.tv_salon_przyznaj_minuty`): ustawia `input_datetime.tv_salon_przedluzenie_do` na `max(teraz, obecne) + minutes`, wyłącza `input_boolean.tv_salon_prosba_o_czas`, czyści powiadomienia z tagiem `luma_prosba_salon` na telefonach; `script.tv_salon_odrzuc_prosbe`: wyłącza prośbę, ustawia flagę odmowy (zdarzenie `luma_bridge_denied`), czyści powiadomienia.
 
 - [ ] **Step 1:** Utworzyć oba skrypty (`ha_config_set_script`), w stylu istniejącego `tv_przyznaj_czas` (bez `remote.*`).
@@ -124,6 +130,7 @@
 **Files:** Modify `src/bridge.rs` (`Update` l. 61, `Job` l. 79, `Service` l. 86–148, `worker` l. 157); Test `src/tests.rs` lub nowy `src/lock-tests.rs` (`#[path]` jak `recents-tests.rs`).
 
 **Interfaces:**
+
 - Produces: `#[derive(Clone, Debug, Default, PartialEq)] pub struct LockState { pub locked: bool, pub reason: String, pub until: String, pub pending: bool, pub denied: bool, pub blocked_apps: Vec<String>, pub notice: String }`; `Update::Lock(LockState)`; `Update::LockResult { ok: bool, retry_after: u64, error: String }`; `Service::lock_request(&self)`; `Service::lock_unlock(&self, pin: String)`; `fn parse_lock(value: &serde_json::Value) -> Option<LockState>`.
 
 - [ ] **Step 1: Write failing tests:** `parse_lock_reads_contract` (JSON z kontraktu → pola), `parse_lock_missing_fields_defaults_unlocked`, `parse_lock_rejects_non_object` (`None`), `three_failures_make_fail_open` (funkcja `LockPoll { failures: u8 }::record(ok: bool) -> Option<LockState>` zwraca `Some(LockState::default())` dopiero przy 3. błędzie z rzędu i `None` wcześniej).
@@ -136,6 +143,7 @@
 **Files:** Modify `src/state.rs` (`Overlay` l. 111, `Target` l. 34, `Effect` l. 152, `direction` l. 708, `back` l. 2081, `activate` l. 1708, aplikowanie `Update` ok. l. 1542, pola `State`), `src/main.rs` (dispatch efektów l. 372–390, klawisze l. 1114); Test `src/tests.rs`.
 
 **Interfaces:**
+
 - Consumes: `LockState`, `Update::Lock`, `Update::LockResult`.
 - Produces: `Overlay::Lock`; `Target::LockPin`, `Target::LockRequest`; `Effect::LockUnlock(String)`, `Effect::LockRequest`; `State` pola `lock: LockState`, `lock_pin: String`, `lock_status: String`; metody `State::locked(&self) -> bool`, `State::lock_digit(&mut self, digit: u8) -> Vec<Effect>`, `State::lock_notice(&self) -> Option<&str>`.
 
@@ -149,6 +157,7 @@
 **Files:** Modify `src/view.rs` (listy `Overlay` l. 375–391 oraz nowa `fn lock_screen(out: &mut Out, state: &State, assets: &Assets)`), `assets/messages.json`; Test `src/tests.rs`.
 
 **Interfaces:**
+
 - Consumes: `State.lock`, `State.lock_pin`, `State.lock_status`, `Target::LockPin`, `Target::LockRequest`.
 - Produces: klucze i18n (`en` i `pl`): `lockTitle` („Telewizor jest zablokowany”), `lockHint` („Wpisz PIN rodzica pilotem albo poproś o zgodę”), `lockRequest` („Poproś o zgodę”), `lockRequestSent` („Prośba wysłana, czekaj na odpowiedź”), `lockWrongPin` („Zły PIN”), `lockWait` („Spróbuj za {seconds} s”), `lockDenied` („Rodzice odmówili”), `lockOffline` („Brak połączenia z Home Assistant”).
 

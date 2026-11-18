@@ -81,6 +81,7 @@ W dashboardzie `kontrola-rodzicielska` dochodzi widok **SALON** (ścieżka `salo
 Nowy krok opcji „Kontrola rodzicielska”: encja blokady (`binary_sensor ... zablokowany`), PIN, encja `media_player` LG, usługi `notify` (telefony Iwana i Martyny), czasy zgód.
 
 Endpointy (token urządzenia):
+
 - `GET /api/luma_bridge/lock` → `{locked, reason, until, pending, denied, blocked_apps, notice}`. `reason` i `notice` po polsku, np. „Czas bez telewizora do 19:00”, „Netflix: limit na dziś wyczerpany”.
 - `POST /api/luma_bridge/lock/unlock` z `{pin}` → `{ok, retry_after}`. Porównanie w czasie stałym, PIN jako sól + skrót w HA (my call), po 3 błędnych próbach przerwa 60 s po stronie serwera. Sukces = tryb rodzica do końca okna.
 - `POST /api/luma_bridge/lock/request` → powiadomienie push na telefony rodziców z akcjami „+30 min”, „+1 h”, „Odrzuć” (te same nazwy akcji co dla Androidów, z dzieckiem „salon”). Jedna prośba na 120 s. Odrzucenie: telewizor zostaje zablokowany, Luma pokazuje „Rodzice odmówili” (my call).
