@@ -1678,3 +1678,28 @@ fn lock_scene_is_small_because_the_page_behind_is_not_built() {
     let state = locked_state();
     assert!(scene(&state).draw.len() < 80);
 }
+
+#[test]
+fn lock_screen_has_no_full_screen_layer_and_no_blurred_shadow() {
+    let state = locked_state();
+    let scene = scene(&state);
+    assert!(!scene.draw.iter().any(|draw| matches!(
+        draw,
+        crate::renderer::Draw::Shape(rect, ..) if rect.w >= 1900. && rect.h >= 1000.
+    )));
+    assert!(
+        !scene
+            .draw
+            .iter()
+            .any(|draw| matches!(draw, crate::renderer::Draw::Shadow(..)))
+    );
+}
+
+#[test]
+fn bubbles_behind_the_lock_panel_are_skipped() {
+    use crate::view::bubble_visible;
+    assert!(!bubble_visible(900., 500., 40.));
+    assert!(bubble_visible(200., 500., 40.));
+    assert!(bubble_visible(470., 500., 40.));
+    assert!(bubble_visible(900., 880., 40.));
+}

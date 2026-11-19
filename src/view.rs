@@ -920,16 +920,25 @@ pub fn lock_play_line(offset: usize, seconds: f32, reduced_motion: bool) -> (usi
     ((offset + step) % count, fade)
 }
 
+/// A bubble hidden completely behind the lock panel is not worth drawing: the TV's GPU
+/// has little room to spare on this screen.
+pub fn bubble_visible(x: f32, y: f32, radius: f32) -> bool {
+    !(x - radius >= 460. && x + radius <= 1460. && y - radius >= 190. && y + radius <= 890.)
+}
+
 /// Soft bubbles drift up behind the lock panel and a row of toy blocks hops below it,
 /// a nudge to go and play instead of watching TV.
 fn lock_play(out: &mut Scene, seconds: f32) {
     const COLORS: [u32; 6] = [0xff6b6b, 0xffd166, 0x06d6a0, 0x4cc9f0, 0xb388eb, 0xff9f1c];
-    for index in 0..14 {
+    for index in 0..10 {
         let speed = 30. + (index % 5) as f32 * 14.;
         let radius = 18. + (index % 4) as f32 * 14.;
         let travel = 1080. + 2. * radius;
         let y = 1080. + radius - (seconds * speed + index as f32 * 97.) % travel;
-        let x = 90. + index as f32 * 132. + (seconds * 0.6 + index as f32).sin() * 26.;
+        let x = 100. + index as f32 * 190. + (seconds * 0.6 + index as f32).sin() * 26.;
+        if !bubble_visible(x, y, radius) {
+            continue;
+        }
         out.shape(
             Rect::new(x - radius, y - radius, radius * 2., radius * 2.),
             radius,
@@ -955,7 +964,6 @@ fn lock_play(out: &mut Scene, seconds: f32) {
 /// Full-screen parental lock: the reason, eight PIN dots and a button that asks the parents.
 fn lock_screen(out: &mut Scene, state: &State) {
     let language = state.preferences.language;
-    out.shape(Rect::new(0., 0., 1920., 1080.), 0., c(0x080b12, 1.));
     let seconds = if state.preferences.reduced_motion {
         0.
     } else {
@@ -1025,7 +1033,18 @@ fn lock_screen(out: &mut Scene, state: &State) {
     out.control(Target::LockPin, field, false);
     let button = Rect::new(710., 630., 500., 84.);
     let button_focus = state.focus == Target::LockRequest;
-    out.pill(button, button_focus, false);
+    out.shape(
+        button,
+        42.,
+        if button_focus {
+            c(0xfafafa, 1.)
+        } else {
+            c(0x303438, 1.)
+        },
+    );
+    if !button_focus {
+        out.border(button, 42., 1., c(0xffffff, 0.07));
+    }
     out.text(
         language.t("lockRequest"),
         Rect::new(button.x, button.y + 26., button.w, 34.),
