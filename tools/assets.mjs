@@ -21,9 +21,13 @@ const font = path.join(out, 'font.woff2');
 await fs.copyFile(path.join(source, 'fonts/inter-latin.woff2'), font);
 const decoded = spawnSync('woff2_decompress', [font], { encoding: 'utf8' });
 if (decoded.error || decoded.status !== 0) {
-  throw new Error('Font conversion needs woff2_decompress. Run pnpm assets inside nix develop.', {
-    cause: decoded.error ?? new Error(decoded.stderr),
-  });
+  const script = `from fontTools.ttLib import TTFont; font=TTFont("${font}"); font.flavor=None; font.save("${path.join(out, 'font.ttf')}")`;
+  const python = spawnSync('python3', ['-c', script], { encoding: 'utf8' });
+  if (python.error || python.status !== 0) {
+    throw new Error('Font conversion needs woff2_decompress or fontTools.', {
+      cause: python.error ?? decoded.error ?? new Error(python.stderr || decoded.stderr),
+    });
+  }
 }
 await fs.rm(font);
 const cjk = path.join(source, 'fonts/noto-sans-sc.ttf');

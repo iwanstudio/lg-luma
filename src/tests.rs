@@ -102,7 +102,7 @@ fn remote_routes_from_header_and_back_through_settings() {
     assert_eq!(state.focus, Target::App("netflix".into()));
     state.direction(Direction::Up, &controls(&state));
     assert_eq!(state.focus, Target::Nav(0));
-    state.open(2);
+    state.open(3);
     state.direction(Direction::Down, &controls(&state));
     assert_eq!(state.focus, Target::Sidebar(0));
     state.activate();
@@ -110,7 +110,7 @@ fn remote_routes_from_header_and_back_through_settings() {
     assert!(state.back().is_empty());
     assert_eq!(state.focus, Target::Sidebar(0));
     state.back();
-    assert_eq!(state.focus, Target::Nav(2));
+    assert_eq!(state.focus, Target::Nav(3));
     state.back();
     assert_eq!(state.page, Page::Home);
     assert_eq!(
@@ -324,7 +324,7 @@ fn preferences_round_trip_and_corrupt_data_is_not_silently_overwritten() {
 #[test]
 fn gallery_and_grid_navigation_scroll_to_keep_focus_visible() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = 1;
     state.focus = Target::Background(0);
     state.direction(Direction::Down, &controls(&state));
@@ -372,7 +372,7 @@ fn pointer_focus_does_not_scroll_the_clicked_control() {
 #[test]
 fn gallery_right_crosses_rows_in_gallery_order() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = 1;
     state.focus = Target::Background(2);
     state.direction(Direction::Right, &controls(&state));
@@ -406,14 +406,17 @@ fn focused_navigation_tabs_switch_pages_immediately() {
     assert_eq!(state.page, Page::Apps);
     assert_eq!(state.focus, Target::Nav(1));
     state.direction(Direction::Right, &controls(&state));
-    assert_eq!(state.page, Page::Settings);
+    assert_eq!(state.page, Page::Dom);
     assert_eq!(state.focus, Target::Nav(2));
+    state.direction(Direction::Right, &controls(&state));
+    assert_eq!(state.page, Page::Settings);
+    assert_eq!(state.focus, Target::Nav(3));
 }
 
 #[test]
 fn greeting_subpage_opens_the_keyboard_and_back_restores_its_parent() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(6);
     assert!(
         state
@@ -446,7 +449,7 @@ fn greeting_name_replacement_commits_on_every_keyboard_completion_route() {
     for route in 0..3 {
         let mut state = ready();
         state.preferences.greeting_name = "Ana".into();
-        state.open(2);
+        state.open(3);
         state.focus = Target::Setting(6);
         state.activate();
         state.activate();
@@ -482,7 +485,7 @@ fn greeting_name_replacement_commits_on_every_keyboard_completion_route() {
 fn remote_can_clear_a_saved_greeting_name_without_moving_the_controls() {
     let mut state = ready();
     state.preferences.greeting_name = "Ana".into();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(6);
     state.activate();
     let before: Vec<_> = controls(&state)
@@ -512,7 +515,7 @@ fn app_name_settings_use_independent_defaults_including_with_legacy_preferences(
     let mut state = ready();
     assert!(!state.preferences.show_home_names);
     assert!(state.preferences.show_app_names);
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(0);
     assert!(
         state
@@ -573,7 +576,7 @@ fn input_name_actions_only_highlight_the_focused_row_and_keep_the_saved_mode() {
     state
         .preferences
         .set_input_name("com.webos.app.hdmi1", "Console");
-    state.open(2);
+    state.open(3);
     state.section = crate::state::INPUTS_SECTION;
     state.focus = Target::InputMode("com.webos.app.hdmi1".into());
     state.activate();
@@ -615,7 +618,7 @@ fn clock_choices_only_highlight_focus_while_preserving_saved_checkmarks() {
     let mut state = ready();
     state.preferences.reduced_motion = true;
     state.preferences.show_seconds = true;
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(1);
     state.activate();
     state.activate();
@@ -650,7 +653,7 @@ fn clock_choices_only_highlight_focus_while_preserving_saved_checkmarks() {
 #[test]
 fn clock_format_subpage_saves_and_restores_its_parent_row() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(1);
     assert!(
         state
@@ -689,7 +692,7 @@ fn clock_format_subpage_saves_and_restores_its_parent_row() {
 fn time_format_selects_seconds_without_changing_the_hour_format() {
     let mut state = ready();
     state.preferences.hour_24 = true;
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(1);
     state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.subpage, Some(crate::state::Subpage::Clock));
@@ -729,7 +732,7 @@ fn time_format_selects_seconds_without_changing_the_hour_format() {
 #[test]
 fn system_category_owns_refresh_and_quit_and_restores_sidebar_focus() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     assert!(
         !controls(&state)
             .iter()
@@ -753,14 +756,14 @@ fn system_category_owns_refresh_and_quit_and_restores_sidebar_focus() {
     state.back();
     assert_eq!(state.focus, Target::Sidebar(crate::state::SYSTEM_SECTION));
     state.direction(Direction::Down, &controls(&state));
-    assert_eq!(state.focus, Target::Sidebar(0));
-    assert_eq!(state.section, 0);
+    assert_eq!(state.focus, Target::Sidebar(crate::state::BRIDGE_SECTION));
+    assert_eq!(state.section, crate::state::BRIDGE_SECTION);
 }
 
 #[test]
 fn input_visibility_has_explicit_choices_and_returns_to_the_same_input() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::INPUTS_SECTION;
     let id = "com.webos.app.hdmi1".to_string();
     state.focus = Target::InputMode(id.clone());
@@ -780,7 +783,7 @@ fn input_visibility_has_explicit_choices_and_returns_to_the_same_input() {
 #[test]
 fn background_entry_restores_the_applied_background() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.preferences.background = "forest".into();
     state.focus = Target::Sidebar(1);
     state.section = 1;
@@ -834,9 +837,51 @@ fn a_notice_does_not_escape_modal_focus_and_closing_restores_the_app() {
     );
     state.focus = Target::Option(1);
     state.direction(Direction::Down, &controls(&state));
-    assert_eq!(state.focus, Target::Option(1));
+    assert_eq!(state.focus, Target::Option(2));
+    state.direction(Direction::Down, &controls(&state));
+    assert_eq!(state.focus, Target::Option(2));
     state.back();
     assert_eq!(state.focus, Target::App("netflix".into()));
+}
+
+#[test]
+fn a_number_shortcut_is_unique_and_launches_the_assigned_app() {
+    let mut state = ready();
+    state.focus = Target::App("netflix".into());
+    state.options();
+    state.focus = Target::Option(2);
+    assert!(state.activate().is_empty());
+    assert!(matches!(state.overlay, Some(Overlay::Shortcut { .. })));
+    state.focus = Target::Option(0);
+    assert_eq!(state.activate(), vec![Effect::Save]);
+    assert_eq!(
+        state.preferences.shortcuts.get("1").map(String::as_str),
+        Some("netflix")
+    );
+    assert_eq!(
+        state.launch_shortcut(1),
+        vec![Effect::Launch("netflix".into())]
+    );
+    assert!(state.launch_shortcut(2).is_empty());
+    state.focus = Target::App("youtube.leanback.v4".into());
+    state.options();
+    state.focus = Target::Option(2);
+    state.activate();
+    state.focus = Target::Option(0);
+    state.activate();
+    assert_eq!(
+        state.preferences.shortcuts.get("1").map(String::as_str),
+        Some("youtube.leanback.v4")
+    );
+    assert!(state.preferences.digit_for_app("netflix").is_none());
+    state.focus = Target::App("youtube.leanback.v4".into());
+    state.options();
+    state.focus = Target::Option(2);
+    state.activate();
+    state.focus = Target::Option(10);
+    assert_eq!(state.activate(), vec![Effect::Save]);
+    assert!(state.preferences.shortcuts.is_empty());
+    state.back();
 }
 
 #[test]
@@ -873,7 +918,7 @@ fn long_captions_expand_rows_without_overlapping_the_next_row() {
 fn reduced_motion_disables_panel_wallpaper_and_notification_animation() {
     let mut state = ready();
     state.preferences.reduced_motion = true;
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(1);
     state.activate();
     assert!(!state.animating());
@@ -907,7 +952,7 @@ fn pinning_a_hidden_app_restores_it_and_leaves_hidden_when_empty() {
 #[test]
 fn weather_location_keyboard_back_and_sidebar_routes_restore_focus() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Sidebar(crate::state::WEATHER_SECTION);
     state.section = crate::state::WEATHER_SECTION;
     state.activate();
@@ -930,7 +975,7 @@ fn weather_location_keyboard_back_and_sidebar_routes_restore_focus() {
 #[test]
 fn weather_units_save_without_replacing_celsius_cache_and_hide_keeps_city() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::WEATHER_SECTION;
     let place = crate::weather::Location {
         name: "Vienna".into(),
@@ -972,7 +1017,7 @@ fn weather_units_save_without_replacing_celsius_cache_and_hide_keeps_city() {
 #[test]
 fn removing_weather_location_clears_cache_and_cancels_pending_results() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::WEATHER_SECTION;
     state.focus = Target::WeatherLocation;
     state.activate();
@@ -993,7 +1038,7 @@ fn removing_weather_location_clears_cache_and_cancels_pending_results() {
 #[test]
 fn language_selection_restores_its_parent_and_is_saved_with_preferences() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.focus = Target::Setting(4);
     state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.subpage, Some(crate::state::Subpage::Language));
@@ -1011,7 +1056,7 @@ fn language_selection_restores_its_parent_and_is_saved_with_preferences() {
 fn remote_can_select_and_restore_every_language() {
     for (index, language) in crate::i18n::Language::ALL.into_iter().enumerate() {
         let mut state = ready();
-        state.open(2);
+        state.open(3);
         state.focus = Target::Setting(4);
         state.activate();
         for _ in 0..index {
@@ -1024,7 +1069,7 @@ fn remote_can_select_and_restore_every_language() {
 
         let saved = serde_json::to_value(&state.preferences).unwrap();
         let mut restored = State::new(serde_json::from_value(saved).unwrap());
-        restored.open(2);
+        restored.open(3);
         restored.focus = Target::Setting(4);
         restored.activate();
         assert_eq!(restored.preferences.language, language);
@@ -1240,7 +1285,7 @@ fn custom_input_names_keep_the_label_port_and_status_as_detail() {
 #[test]
 fn remote_renames_and_resets_an_input_from_its_settings_page() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::INPUTS_SECTION;
     let id = "com.webos.app.hdmi2".to_string();
     state.focus = Target::InputMode(id.clone());
@@ -1284,7 +1329,7 @@ fn remote_renames_and_resets_an_input_from_its_settings_page() {
 #[test]
 fn keyboard_done_saves_a_typed_input_name() {
     let mut state = ready();
-    state.open(2);
+    state.open(3);
     state.section = crate::state::INPUTS_SECTION;
     state.focus = Target::InputMode("com.webos.app.hdmi1".into());
     state.activate();
@@ -1300,4 +1345,361 @@ fn keyboard_done_saves_a_typed_input_name() {
     assert_eq!(state.activate(), vec![Effect::Save]);
     assert_eq!(state.preferences.input_names["com.webos.app.hdmi1"], "PS5");
     assert!(state.overlay.is_none());
+}
+
+fn locked_state() -> State {
+    let mut state = ready();
+    state.apply_bridge(crate::bridge::Update::Lock(crate::bridge::LockState {
+        locked: true,
+        reason: "Czas bez telewizora do 19:00".into(),
+        ..Default::default()
+    }));
+    state
+}
+
+#[test]
+fn lock_update_opens_overlay_and_unlock_closes_it() {
+    let mut state = locked_state();
+    assert!(state.locked());
+    assert_eq!(state.focus, Target::LockPin);
+    state.apply_bridge(crate::bridge::Update::Lock(
+        crate::bridge::LockState::default(),
+    ));
+    assert!(!state.locked());
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn lock_digits_append_up_to_eight_and_ok_submits() {
+    let mut state = locked_state();
+    for digit in [1, 2, 3, 4] {
+        state.lock_digit(digit);
+    }
+    assert_eq!(state.activate(), vec![Effect::LockUnlock("1234".into())]);
+    assert!(state.lock_pin.is_empty());
+    for digit in 0..10 {
+        state.lock_digit(digit);
+    }
+    assert_eq!(state.lock_pin.len(), 8);
+    assert_eq!(state.lock_pin, "01234567");
+}
+
+#[test]
+fn lock_back_deletes_last_digit_and_never_closes() {
+    let mut state = locked_state();
+    state.lock_digit(4);
+    state.lock_digit(2);
+    state.back();
+    assert_eq!(state.lock_pin, "4");
+    for _ in 0..3 {
+        state.back();
+    }
+    assert!(state.lock_pin.is_empty());
+    assert!(state.locked());
+}
+
+#[test]
+fn lock_arrows_move_between_pin_and_request() {
+    let mut state = locked_state();
+    state.direction(Direction::Down, &controls(&state));
+    assert_eq!(state.focus, Target::LockRequest);
+    assert_eq!(state.activate(), vec![Effect::LockRequest]);
+    state.direction(Direction::Up, &controls(&state));
+    assert_eq!(state.focus, Target::LockPin);
+    state.direction(Direction::Left, &controls(&state));
+    assert_eq!(state.focus, Target::LockPin);
+}
+
+#[test]
+fn lock_blocks_shortcut_and_recents_hold() {
+    let mut state = locked_state();
+    assert!(state.hold().is_empty());
+    assert!(state.open_recents().is_empty());
+    assert!(state.locked());
+    assert!(state.activate_shortcut_digit(1).is_empty());
+    assert!(state.launch_shortcut(1).is_empty());
+}
+
+#[test]
+fn lock_overrides_camera_overlay() {
+    let mut state = locked_state();
+    state.apply_bridge(crate::bridge::Update::Ring {
+        id: 1,
+        camera: "camera.furtka".into(),
+        title: "Ktoś dzwoni".into(),
+    });
+    assert!(matches!(state.overlay, Some(Overlay::Lock)));
+}
+
+#[test]
+fn lock_result_wrong_pin_sets_status_and_clears_pin() {
+    let mut state = locked_state();
+    state.lock_digit(1);
+    state.apply_bridge(crate::bridge::Update::LockResult {
+        request: false,
+        ok: false,
+        retry_after: 0,
+        error: String::new(),
+    });
+    assert_eq!(
+        state.lock_status,
+        state.preferences.language.t("lockWrongPin")
+    );
+    assert!(state.lock_pin.is_empty());
+}
+
+#[test]
+fn lock_result_with_retry_after_shows_seconds() {
+    let mut state = locked_state();
+    state.apply_bridge(crate::bridge::Update::LockResult {
+        request: false,
+        ok: false,
+        retry_after: 42,
+        error: String::new(),
+    });
+    assert!(state.lock_status.contains("42"));
+}
+
+#[test]
+fn lock_line_prefers_status_then_denied_then_pending() {
+    let mut state = locked_state();
+    assert!(state.lock_line().is_empty());
+    state.lock.pending = true;
+    assert_eq!(
+        state.lock_line(),
+        state.preferences.language.t("lockRequestSent")
+    );
+    state.lock.denied = true;
+    assert_eq!(
+        state.lock_line(),
+        state.preferences.language.t("lockDenied")
+    );
+    state.lock_status = "Zły PIN".into();
+    assert_eq!(state.lock_line(), "Zły PIN");
+}
+
+#[test]
+fn lock_screen_scene_has_pin_and_request_controls() {
+    let state = locked_state();
+    let targets: Vec<_> = controls(&state)
+        .into_iter()
+        .map(|control| control.target)
+        .collect();
+    assert_eq!(targets, vec![Target::LockPin, Target::LockRequest]);
+}
+
+#[test]
+fn lock_messages_exist_in_polish_and_english() {
+    use crate::i18n::Language;
+    for key in [
+        "lockTitle",
+        "lockHint",
+        "lockRequest",
+        "lockRequestSent",
+        "lockWrongPin",
+        "lockWait",
+        "lockDenied",
+        "lockOffline",
+    ] {
+        assert_ne!(Language::Pl.t(key), key);
+        assert_ne!(Language::En.t(key), key);
+    }
+    assert_eq!(Language::Pl.t("lockTitle"), "Telewizor jest zablokowany");
+    assert_eq!(Language::Pl.t("lockWrongPin"), "Zły PIN");
+    assert_eq!(
+        Language::Pl.format("lockWait", &[("seconds", "42")]),
+        "Spróbuj za 42 s"
+    );
+}
+
+#[test]
+fn lock_screen_shows_reason_from_ha() {
+    let state = locked_state();
+    let scene = scene(&state);
+    assert!(scene.draw.iter().any(|draw| matches!(
+        draw,
+        crate::renderer::Draw::Text(value, ..) if value == "Czas bez telewizora do 19:00"
+    )));
+}
+
+#[test]
+fn lock_pin_is_drawn_as_dots_never_digits() {
+    let mut state = locked_state();
+    for digit in [4, 2, 7] {
+        state.lock_digit(digit);
+    }
+    let scene = scene(&state);
+    assert!(!scene.draw.iter().any(|draw| matches!(
+        draw,
+        crate::renderer::Draw::Text(value, ..) if matches!(value.as_str(), "427" | "4" | "2" | "7")
+    )));
+}
+
+#[test]
+fn lock_update_with_denied_clears_the_status_line() {
+    let mut state = locked_state();
+    state.apply_bridge(crate::bridge::Update::LockResult {
+        request: true,
+        ok: true,
+        retry_after: 120,
+        error: String::new(),
+    });
+    assert_eq!(
+        state.lock_line(),
+        state.preferences.language.t("lockRequestSent")
+    );
+    state.apply_bridge(crate::bridge::Update::Lock(crate::bridge::LockState {
+        locked: true,
+        denied: true,
+        ..Default::default()
+    }));
+    assert_eq!(
+        state.lock_line(),
+        state.preferences.language.t("lockDenied")
+    );
+}
+
+#[test]
+fn lock_status_expires_on_tick() {
+    let mut state = locked_state();
+    state.lock_status = "Zły PIN".into();
+    state.lock_status_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(9));
+    state.tick();
+    assert!(state.lock_status.is_empty());
+}
+
+fn locked_with_pin_length(length: usize) -> State {
+    let mut state = ready();
+    state.apply_bridge(crate::bridge::Update::Lock(crate::bridge::LockState {
+        locked: true,
+        pin_length: length,
+        ..Default::default()
+    }));
+    state
+}
+
+#[test]
+fn lock_digits_stop_at_the_pin_length() {
+    let mut state = locked_with_pin_length(4);
+    for digit in [0, 1, 2, 3, 4, 5] {
+        state.lock_digit(digit);
+    }
+    assert_eq!(state.lock_pin, "0123");
+}
+
+#[test]
+fn lock_screen_draws_one_dot_per_pin_digit() {
+    let dots = |state: &State| {
+        scene(state)
+            .draw
+            .iter()
+            .filter(|draw| {
+                matches!(
+                    draw,
+                    crate::renderer::Draw::Shape(rect, radius, width, _)
+                        if rect.w == 20. && rect.h == 20. && *radius == 10. && *width == 0.
+                )
+            })
+            .count()
+    };
+    assert_eq!(dots(&locked_with_pin_length(4)), 4);
+    assert_eq!(dots(&locked_with_pin_length(6)), 6);
+    assert_eq!(dots(&locked_with_pin_length(0)), 8);
+}
+
+fn lock_play_key(index: usize) -> String {
+    if index == 0 {
+        "lockPlay".to_owned()
+    } else {
+        format!("lockPlay{}", index + 1)
+    }
+}
+
+#[test]
+fn lock_screen_invites_the_children_to_play() {
+    let state = locked_state();
+    let language = state.preferences.language;
+    let messages: Vec<String> = (0..crate::state::LOCK_PLAY_COUNT)
+        .map(|index| language.t(&lock_play_key(index)).to_owned())
+        .collect();
+    assert!(scene(&state).draw.iter().any(|draw| matches!(
+        draw,
+        crate::renderer::Draw::Text(value, ..) if messages.contains(value)
+    )));
+}
+
+#[test]
+fn lock_play_messages_exist_in_polish_and_english() {
+    use crate::i18n::Language;
+    for index in 0..crate::state::LOCK_PLAY_COUNT {
+        let key = lock_play_key(index);
+        assert_ne!(Language::Pl.t(&key), key);
+        assert_ne!(Language::En.t(&key), key);
+    }
+}
+
+#[test]
+fn lock_play_message_rotates_and_fades() {
+    use crate::view::lock_play_line;
+    assert_eq!(lock_play_line(3, 0., true), (3, 1.));
+    assert_eq!(lock_play_line(3, 99., true), (3, 1.));
+    assert_eq!(lock_play_line(0, 7., false), (0, 1.));
+    let (index, fade) = lock_play_line(0, 14.4, false);
+    assert_eq!(index, 1);
+    assert!((fade - 0.5).abs() < 0.01);
+    assert_eq!(lock_play_line(7, 14.8, false).0, 0);
+    assert!(lock_play_line(0, 0., false).1 < 0.01);
+    assert!(lock_play_line(0, 13.9, false).1 < 0.2);
+}
+
+#[test]
+fn lock_animation_keeps_redrawing_unless_motion_is_reduced() {
+    let mut state = locked_state();
+    state.dirty = false;
+    state.tick();
+    assert!(state.dirty);
+    state.preferences.reduced_motion = true;
+    state.dirty = false;
+    state.tick();
+    assert!(!state.dirty);
+}
+
+#[test]
+fn lock_animation_runs_every_frame_unless_motion_is_reduced() {
+    let mut state = locked_state();
+    assert!(state.animating());
+    state.preferences.reduced_motion = true;
+    assert!(!state.animating());
+    assert!(!ready().animating());
+}
+
+#[test]
+fn lock_scene_is_small_because_the_page_behind_is_not_built() {
+    let state = locked_state();
+    assert!(scene(&state).draw.len() < 80);
+}
+
+#[test]
+fn lock_screen_has_no_full_screen_layer_and_no_blurred_shadow() {
+    let state = locked_state();
+    let scene = scene(&state);
+    assert!(!scene.draw.iter().any(|draw| matches!(
+        draw,
+        crate::renderer::Draw::Shape(rect, ..) if rect.w >= 1900. && rect.h >= 1000.
+    )));
+    assert!(
+        !scene
+            .draw
+            .iter()
+            .any(|draw| matches!(draw, crate::renderer::Draw::Shadow(..)))
+    );
+}
+
+#[test]
+fn bubbles_behind_the_lock_panel_are_skipped() {
+    use crate::view::bubble_visible;
+    assert!(!bubble_visible(900., 500., 40.));
+    assert!(bubble_visible(200., 500., 40.));
+    assert!(bubble_visible(470., 500., 40.));
+    assert!(bubble_visible(900., 880., 40.));
 }
