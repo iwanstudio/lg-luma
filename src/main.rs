@@ -852,9 +852,6 @@ fn run() -> Result<(), String> {
         pill_width,
         options.time.unwrap_or_else(OffsetDateTime::now_utc),
     );
-    // Temporary measurement of the lock screen frame rate, read over SSH.
-    let mut lock_frames = 0u32;
-    let mut lock_since = Instant::now();
     while running {
         let now = options
             .time
@@ -1433,26 +1430,6 @@ fn run() -> Result<(), String> {
                     }
                 }
                 presented += 1;
-                if state.locked() {
-                    lock_frames += 1;
-                    if lock_since.elapsed() >= Duration::from_secs(2) {
-                        let stats = renderer.stats();
-                        let line = format!(
-                            "fps={:.1} submit_ms={:.1} drawable={}x{} msaa={}\n",
-                            lock_frames as f32 / lock_since.elapsed().as_secs_f32(),
-                            stats.cpu_submission_ms,
-                            width,
-                            height,
-                            stats.multisample_samples,
-                        );
-                        let _ = std::fs::write("/tmp/luma-lock-fps.txt", line);
-                        lock_frames = 0;
-                        lock_since = Instant::now();
-                    }
-                } else {
-                    lock_frames = 0;
-                    lock_since = Instant::now();
-                }
                 if options.profile_frames.is_some() {
                     profile.record(
                         Instant::now(),
